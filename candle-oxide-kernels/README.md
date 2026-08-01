@@ -6,7 +6,9 @@ This crate ships precompiled PTX for 46 entry points across two modules: `oxide:
 
 ## Architecture
 
-The committed PTX targets `sm_80` (Ampere). The CUDA driver automatically JITs to newer architectures when loaded on more recent devices, and the oldest supported Ampere hardware runs the binary natively.
+The committed PTX targets `sm_80` (Ampere). Every load goes through the CUDA driver's PTX-to-SASS JIT regardless of GPU architecture, since this crate ships PTX text rather than a cubin; PTX is forward-compatible, so the driver JITs the same module up to whatever architecture the running GPU implements.
+
+Measurement in `docs/arch-baseline.md` found no measurable difference in first-load JIT cost between `sm_75`, `sm_80` and the running GPU's own architecture, and recommends `sm_75` for broader hardware coverage at the same cost. The PTX currently committed here still targets `sm_80`; `cargo xtask gen-ptx --arch <target>` regenerates it for any architecture without changing this crate's shape.
 
 ## Loading
 
