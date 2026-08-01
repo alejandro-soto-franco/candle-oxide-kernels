@@ -2,17 +2,40 @@ use candle_oxide_codegen::build_family;
 use candle_oxide_codegen::desc::{binary_ops, Family};
 use candle_oxide_codegen::testing::assert_ptxas_accepts;
 
+/// A SINGLE-entry module. Every assertion below uses a bare `ptx.contains`
+/// or a bare count, which is sound only because the module holds one entry.
+/// Widening this filter silently turns those assertions module-scoped, the
+/// defect Task 4 fixed by introducing `testing::entry_body`.
 fn badd_only() -> Vec<candle_oxide_codegen::desc::OpDesc> {
     binary_ops().into_iter().filter(|op| op.name == "badd_f32").collect()
 }
 
 #[test]
-fn the_entry_has_four_layout_paths() {
+fn each_strided_path_decomposes_its_own_index() {
     let ptx = build_family(Family::Binary, &badd_only(), "sm_80").unwrap();
-    // Four grid-stride loops means at least four backward branches, one per
-    // layout path, plus the two is_contiguous loops.
-    let branches = ptx.matches("bra").count();
-    assert!(branches >= 6, "expected the four layout paths and two is_contiguous loops, saw {branches} branches:\n{ptx}");
+    // Every strided operand walks the dimensions once, dividing the running
+    // index by `dims[dim_idx]` per step. Counting those divisions counts the
+    // strided operands across the four layout paths:
+    //
+    //   both contiguous       0
+    //   lhs contiguous only   1  (the rhs is decomposed)
+    //   rhs contiguous only   1  (the lhs is decomposed)
+    //   neither contiguous    2  (both are decomposed)
+    //
+    // The remainder never appears as `rem.u32`: LLVM strength-reduces
+    // `idx % dim` into this same `div.u32` followed by `mul.lo.s32` and
+    // `sub.s32`, so the division is the site that survives.
+    //
+    // Verified by mutation: forcing all four paths contiguous drops the count
+    // to 0. The count is invariant under swapping the two single-strided
+    // paths, so it does not pin which operand each path decomposes; that
+    // pairing is covered by the GPU parity comparison.
+    let divisions = ptx.matches("div.u32").count();
+    assert_eq!(
+        divisions, 4,
+        "expected one index decomposition per strided operand across the four \
+         layout paths, saw {divisions}:\n{ptx}"
+    );
 }
 
 #[test]

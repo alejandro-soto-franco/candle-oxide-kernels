@@ -4,18 +4,22 @@
 use crate::desc::{DType, OutType};
 use cuda_oxide_codegen::experimental::CodegenModule;
 use dialect_mir::attributes::MirCastKindAttr;
-use dialect_mir::ops::{MirCastOp, MirConstantOp, MirFloatConstantOp};
+use dialect_mir::ops::{
+    MirCastOp, MirCondBranchOp, MirConstantOp, MirFloatConstantOp, MirGotoOp,
+};
 use dialect_mir::types::MirPtrType;
 use pliron::{
     basic_block::BasicBlock,
     builtin::{
         attributes::{FPDoubleAttr, IntegerAttr},
+        op_interfaces::OperandSegmentInterface,
         types::{FP32Type, FP64Type, IntegerType, Signedness},
     },
     context::{Context, Ptr},
     linked_list::ContainsLinkedList,
     op::Op,
     operation::Operation,
+    region::Region,
     r#type::TypeHandle,
     utils::apint::APInt,
     value::Value,
@@ -170,6 +174,46 @@ impl Tys {
             out_ptr: MirPtrType::get_global(ctx, out_elem, true).into(),
         }
     }
+}
+
+/// Append an empty basic block with arguments of type `args` to `region`.
+pub fn new_block(ctx: &mut Context, region: Ptr<Region>, args: Vec<TypeHandle>) -> Ptr<BasicBlock> {
+    let block = BasicBlock::new(ctx, None, args);
+    block.insert_at_back(region, ctx);
+    block
+}
+
+/// Terminate `block` with an unconditional branch to `target`, passing `args`
+/// as the target's block arguments.
+pub fn goto(ctx: &mut Context, block: Ptr<BasicBlock>, target: Ptr<BasicBlock>, args: Vec<Value>) {
+    let op = Operation::new(ctx, MirGotoOp::get_concrete_op_info(), vec![], args, vec![target], 0);
+    op.insert_at_back(block, ctx);
+}
+
+/// Terminate `block` with a conditional branch. `true_args` and `false_args`
+/// supply each successor's block arguments.
+pub fn cond_br(
+    ctx: &mut Context,
+    block: Ptr<BasicBlock>,
+    cond: Value,
+    true_target: Ptr<BasicBlock>,
+    true_args: Vec<Value>,
+    false_target: Ptr<BasicBlock>,
+    false_args: Vec<Value>,
+) {
+    let (flat, segs) = MirCondBranchOp::compute_segment_sizes(vec![vec![cond], true_args, false_args]);
+    let op = Operation::new(
+        ctx,
+        MirCondBranchOp::get_concrete_op_info(),
+        vec![],
+        flat,
+        vec![true_target, false_target],
+        0,
+    );
+    Operation::get_op::<MirCondBranchOp>(op, ctx)
+        .unwrap()
+        .set_operand_segment_sizes(ctx, segs);
+    op.insert_at_back(block, ctx);
 }
 
 /// The module's single top-level block, created if the module has none.

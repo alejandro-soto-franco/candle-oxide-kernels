@@ -8,58 +8,21 @@
 //! site are still live at the continuation and need no threading through
 //! block arguments.
 
-use crate::emit::{const_i1, const_u32, const_u64, emit, narrow_u64_to_u32, widen_u32_to_u64, Tys};
+use crate::emit::{
+    cond_br, const_i1, const_u32, const_u64, emit, goto, narrow_u64_to_u32, new_block,
+    widen_u32_to_u64, Tys,
+};
 use dialect_mir::ops::{
-    MirAddOp, MirCondBranchOp, MirDivOp, MirGotoOp, MirGtOp, MirLoadOp, MirLtOp, MirMulOp,
-    MirNeOp, MirPtrOffsetOp, MirRemOp, MirSubOp,
+    MirAddOp, MirDivOp, MirGtOp, MirLoadOp, MirLtOp, MirMulOp, MirNeOp, MirPtrOffsetOp, MirRemOp,
+    MirSubOp,
 };
 use pliron::{
     basic_block::BasicBlock,
-    builtin::op_interfaces::OperandSegmentInterface,
     context::{Context, Ptr},
     op::Op,
-    operation::Operation,
     region::Region,
     value::Value,
 };
-
-/// Terminate `block` with an unconditional branch to `target`, passing `args`.
-pub fn goto(ctx: &mut Context, block: Ptr<BasicBlock>, target: Ptr<BasicBlock>, args: Vec<Value>) {
-    let op = Operation::new(ctx, MirGotoOp::get_concrete_op_info(), vec![], args, vec![target], 0);
-    op.insert_at_back(block, ctx);
-}
-
-/// Terminate `block` with a conditional branch. `true_args` and `false_args`
-/// supply each successor's block arguments.
-pub fn cond_br(
-    ctx: &mut Context,
-    block: Ptr<BasicBlock>,
-    cond: Value,
-    true_target: Ptr<BasicBlock>,
-    true_args: Vec<Value>,
-    false_target: Ptr<BasicBlock>,
-    false_args: Vec<Value>,
-) {
-    let (flat, segs) = MirCondBranchOp::compute_segment_sizes(vec![vec![cond], true_args, false_args]);
-    let op = Operation::new(
-        ctx,
-        MirCondBranchOp::get_concrete_op_info(),
-        vec![],
-        flat,
-        vec![true_target, false_target],
-        0,
-    );
-    Operation::get_op::<MirCondBranchOp>(op, ctx)
-        .unwrap()
-        .set_operand_segment_sizes(ctx, segs);
-    op.insert_at_back(block, ctx);
-}
-
-fn new_block(ctx: &mut Context, region: Ptr<Region>, args: Vec<pliron::r#type::TypeHandle>) -> Ptr<BasicBlock> {
-    let block = BasicBlock::new(ctx, None, args);
-    block.insert_at_back(region, ctx);
-    block
-}
 
 /// `dims[dim_idx]`, where `dim_idx` is a 64-bit index into a `const size_t *`.
 fn load_usize(ctx: &mut Context, block: Ptr<BasicBlock>, tys: &Tys, base: Value, idx: Value) -> Value {
@@ -82,7 +45,7 @@ fn dim_index(ctx: &mut Context, block: Ptr<BasicBlock>, tys: &Tys, num_dims: Val
 ///
 /// The accumulator is 64-bit, as `size_t acc` is, and it is compared against
 /// the 64-bit stride without narrowing. Dimensions of extent 1 are skipped.
-/// Returns the `i1` verdict and the block the caller continues in.
+/// Returns the `i1` verdict and the block where the caller carries on.
 pub fn emit_is_contiguous(
     ctx: &mut Context,
     region: Ptr<Region>,
@@ -148,7 +111,7 @@ pub fn emit_is_contiguous(
 /// multiply, the accumulation and the division all run at 32 bits. Only the
 /// dimension counter stays 64-bit, since it indexes the `size_t` arrays.
 ///
-/// Returns the 32-bit index and the block the caller continues in.
+/// Returns the 32-bit index and the block where the caller carries on.
 #[allow(clippy::too_many_arguments)]
 pub fn emit_strided_index(
     ctx: &mut Context,

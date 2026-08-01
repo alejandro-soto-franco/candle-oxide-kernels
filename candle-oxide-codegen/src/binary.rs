@@ -8,8 +8,8 @@
 
 use crate::body::emit_body;
 use crate::desc::OpDesc;
-use crate::emit::{emit, module_block, widen_u32_to_u64, Tys};
-use crate::index::{cond_br, emit_is_contiguous, emit_strided_index, goto};
+use crate::emit::{cond_br, emit, goto, module_block, new_block, widen_u32_to_u64, Tys};
+use crate::index::{emit_is_contiguous, emit_strided_index};
 use cuda_oxide_codegen::experimental::CodegenModule;
 use dialect_mir::attributes::MirCastKindAttr;
 use dialect_mir::ops::{
@@ -129,9 +129,12 @@ pub fn build_binary(module: &mut CodegenModule, op: &OpDesc) {
 
         let env = Env { numel, num_dims, dims, lhs, rhs, out, i0, step, lhs_strides, rhs_strides };
 
+        // Named for which operand is contiguous, matching the C's `lhs_cont`
+        // and `rhs_cont`. The `IndexMode` on the same line is the opposite
+        // reading: an operand that is contiguous is indexed contiguously.
         let both = emit_loop(ctx, region, &tys, op, &env, IndexMode::Contiguous, IndexMode::Contiguous);
-        let lhs_only = emit_loop(ctx, region, &tys, op, &env, IndexMode::Contiguous, IndexMode::Strided);
-        let rhs_only = emit_loop(ctx, region, &tys, op, &env, IndexMode::Strided, IndexMode::Contiguous);
+        let lhs_cont_only = emit_loop(ctx, region, &tys, op, &env, IndexMode::Contiguous, IndexMode::Strided);
+        let rhs_cont_only = emit_loop(ctx, region, &tys, op, &env, IndexMode::Strided, IndexMode::Contiguous);
         let neither = emit_loop(ctx, region, &tys, op, &env, IndexMode::Strided, IndexMode::Strided);
 
         // A null `dims_and_strides` takes the both-contiguous loop directly.
@@ -141,8 +144,8 @@ pub fn build_binary(module: &mut CodegenModule, op: &OpDesc) {
         let on_lhs_cont = new_block(ctx, region, vec![]);
         let on_lhs_strided = new_block(ctx, region, vec![]);
         cond_br(ctx, after_rhs, lhs_cont, on_lhs_cont, vec![], on_lhs_strided, vec![]);
-        cond_br(ctx, on_lhs_cont, rhs_cont, both, vec![], lhs_only, vec![]);
-        cond_br(ctx, on_lhs_strided, rhs_cont, rhs_only, vec![], neither, vec![]);
+        cond_br(ctx, on_lhs_cont, rhs_cont, both, vec![], lhs_cont_only, vec![]);
+        cond_br(ctx, on_lhs_strided, rhs_cont, rhs_cont_only, vec![], neither, vec![]);
 
         func.get_operation().insert_at_back(module_block, ctx);
     });
@@ -202,7 +205,8 @@ fn emit_loop(
     preheader
 }
 
-/// The 32-bit element index for one operand, and the block to continue in.
+/// The 32-bit element index for one operand, and the block where the caller
+/// carries on.
 ///
 /// The contiguous mode is the identity on the induction variable and appends
 /// no blocks, so the caller carries on where it was.
@@ -233,10 +237,4 @@ fn expose_address(ctx: &mut Context, block: Ptr<BasicBlock>, tys: &Tys, ptr: Val
     let res = cast.deref(ctx).get_result(0);
     cast.insert_at_back(block, ctx);
     res
-}
-
-fn new_block(ctx: &mut Context, region: Ptr<Region>, args: Vec<pliron::r#type::TypeHandle>) -> Ptr<BasicBlock> {
-    let block = BasicBlock::new(ctx, None, args);
-    block.insert_at_back(region, ctx);
-    block
 }
