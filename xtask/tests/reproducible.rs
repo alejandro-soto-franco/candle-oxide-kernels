@@ -66,8 +66,12 @@ fn regenerating_reproduces_the_committed_artifacts() {
         .unwrap_or(0);
     let fresh = std::env::temp_dir().join(format!("xtask_repro_{}_{}", std::process::id(), unique));
 
+    // Must track the baseline actually committed under `candle-oxide-kernels/ptx/`,
+    // decided and recorded in `docs/arch-baseline.md`. This is the one test that
+    // reads the committed artifacts rather than building its own reference, so it
+    // is the one place this value has to move when the baseline does.
     let out = Command::new(env!("CARGO_BIN_EXE_xtask"))
-        .args(["gen-ptx", "--arch", "sm_80", "--out"])
+        .args(["gen-ptx", "--arch", "sm_75", "--out"])
         .arg(&fresh)
         .output()
         .expect("xtask runs");

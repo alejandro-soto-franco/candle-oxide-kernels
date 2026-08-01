@@ -1,11 +1,12 @@
 # PTX baseline architecture
 
-The committed PTX under `candle-oxide-kernels/ptx/` targets `sm_80`, a
-placeholder set before this measurement existed. `sm_75` was the other
-candidate. PTX is forward-compatible: the CUDA driver JITs a module built at
-an older baseline up to whatever architecture the running GPU implements, so
-the question is not correctness but the JIT cost paid on first load of a
-module built below the GPU's own architecture.
+The committed PTX under `candle-oxide-kernels/ptx/` targets `sm_75`. `sm_80`
+was the placeholder set before this measurement existed. PTX is
+forward-compatible: the CUDA driver JITs a module built at an older baseline
+up to whatever architecture the running GPU implements, so the question is
+not correctness but the JIT cost paid on first load of a module built below
+the GPU's own architecture, and, separately, whether `sm_75` codegen agrees
+with `sm_80` codegen at all. Both are addressed below.
 
 ## Method
 
@@ -74,15 +75,41 @@ the question rather than a fabricated performance argument.
 
 `sm_75` (Turing and later) is the better baseline: it covers three more
 hardware generations than `sm_80` (Ampere and later) at no measured JIT
-cost. `candle-oxide-kernels/ptx/` still ships `sm_80` PTX as of this
-measurement; adopting `sm_75` is a one-command regeneration,
-`cargo xtask gen-ptx --arch sm_75 --out candle-oxide-kernels/ptx`, followed
-by the full test and CI reproducibility check. That regeneration is left
-for a separate commit so this task's diff stays documentation-only against
-the artefact Task 13 already validated (31 tests, GPU parity at difference
-0.0, dispatch-site mutation coverage). The xtask can emit any architecture
-on demand, so nothing about the crate's shape depends on which baseline is
-currently committed.
+cost. Applied by regenerating in place:
+
+```
+cd $REPO && cargo xtask gen-ptx --arch sm_75
+```
+
+Both `ptx/binary.ptx` and `ptx/unary.ptx` changed (confirmed by content
+hash), still declare 24 binary and 22 unary entries, and `ptxas` accepts
+both at `sm_75` and at `sm_120` (the development GPU's own architecture,
+exercising the forward-compatibility path).
+
+`sm_75` and `sm_80` are different code-generation targets, so the earlier
+bit-exactness evidence, gathered against `sm_80` PTX, does not automatically
+carry over. Re-run after regenerating:
+
+- The workspace test suite (`cargo test --workspace` in `$REPO`):
+  27 tests pass, including `regenerating_reproduces_the_committed_artifacts`
+  (updated to regenerate at `sm_75` to match the new committed baseline;
+  the other codegen tests build their own `sm_80` reference independently
+  of the committed artefacts and are unaffected by this change) and
+  `abi_diff::every_entry_matches_nvcc_parameter_shape` (compares against an
+  nvcc reference still built at `sm_80`; this stayed green, so the
+  parameter-shape divergence this test guards is not arch-sensitive between
+  `sm_75` and `sm_80`).
+- The GPU parity suite in the consuming checkout
+  (`cargo test -p candle-core --features cuda,oxide-kernels --test
+  oxide_parity` in `$CANDLE`, branch `spike/cuda-oxide-uneg`): all 63 cases
+  pass at difference exactly `0.0` against the regenerated `sm_75` PTX,
+  picked up automatically through the path dependency. `$CANDLE` needed no
+  change and its working tree stayed clean throughout.
+
+`sm_75` is both the recommended and the shipped baseline as of this
+measurement. The xtask can still emit any architecture on demand
+(`cargo xtask gen-ptx --arch <target> --out <dir>`), so a future baseline
+change follows the same regenerate-and-revalidate path.
 
 ## The `.align 1` pointer annotation
 
