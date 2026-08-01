@@ -52,6 +52,81 @@ pub fn assert_ptxas_accepts(ptx: &[u8], label: &str, arch: &str) {
     );
 }
 
+/// Locate `nvcc`, same search order as `find_ptxas`.
+pub fn find_nvcc() -> PathBuf {
+    ["CUDA_TOOLKIT_PATH", "CUDA_HOME"]
+        .iter()
+        .filter_map(|var| std::env::var(var).ok())
+        .filter(|root| !root.trim().is_empty())
+        .map(|root| PathBuf::from(root).join("bin/nvcc"))
+        .chain(std::iter::once(PathBuf::from("/usr/local/cuda/bin/nvcc")))
+        .find(|candidate| candidate.exists())
+        .unwrap_or_else(|| PathBuf::from("nvcc"))
+}
+
+/// Compile a `.cu` to PTX with nvcc and return the text. Mirrors the flags
+/// `candle-kernels/build.rs` passes on this branch: GCC 16's frontend trips
+/// on a builtin pulled in by system headers, so nvcc needs the compatibility
+/// pre-include and `--allow-unsupported-compiler` to accept the host
+/// compiler at all.
+pub fn nvcc_ptx_for(cu_path: &std::path::Path, include_dir: &std::path::Path, arch: &str) -> String {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!(
+        "candle_oxide_nvcc_{}_{}",
+        std::process::id(),
+        unique
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("reference.ptx");
+    let compat_header = include_dir.join("gcc16_cuda_compat.h");
+    let result = std::process::Command::new(find_nvcc())
+        .arg("--ptx")
+        .arg(format!("-arch={arch}"))
+        .arg("--allow-unsupported-compiler")
+        .arg("--pre-include")
+        .arg(&compat_header)
+        .arg("--expt-relaxed-constexpr")
+        .arg("-std=c++17")
+        .arg("-O3")
+        .arg("-I")
+        .arg(include_dir)
+        .arg(cu_path)
+        .arg("-o")
+        .arg(&out)
+        .output();
+    let out_result = result.unwrap_or_else(|error| {
+        panic!(
+            "could not run {}: {error}\nThis test needs `nvcc` from a CUDA toolkit \
+             (no GPU required). Point CUDA_TOOLKIT_PATH or CUDA_HOME at the install \
+             root, or put `nvcc` on PATH.",
+            find_nvcc().display()
+        )
+    });
+    assert!(
+        out_result.status.success(),
+        "nvcc failed on {}:\n{}",
+        cu_path.display(),
+        String::from_utf8_lossy(&out_result.stderr)
+    );
+    let text = std::fs::read_to_string(&out).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    text
+}
+
+/// The `.param` lines of one entry, in declaration order.
+pub fn entry_params(ptx: &str, entry: &str) -> Vec<String> {
+    let needle = format!(".entry {entry}(");
+    ptx.lines()
+        .skip_while(|line| !line.contains(&needle))
+        .take_while(|line| !line.contains(')'))
+        .filter(|line| line.contains(".param"))
+        .map(|line| line.trim().trim_end_matches(',').to_string())
+        .collect()
+}
+
 /// The PTX text of one entry point, from its `.visible .entry` line to the
 /// closing brace of its body. Panics if the entry is absent, since every
 /// caller is asserting something about an entry it expects to exist.
