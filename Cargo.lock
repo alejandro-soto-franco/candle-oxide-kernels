@@ -129,7 +129,7 @@ dependencies = [
  "cuda-oxide-codegen",
  "dialect-mir",
  "dialect-nvvm",
- "pliron 0.16.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "pliron",
 ]
 
 [[package]]
@@ -175,7 +175,7 @@ dependencies = [
  "mir-lower",
  "mir-transforms",
  "nvvm-transforms",
- "pliron 0.16.0 (git+https://github.com/pliron-org/pliron?rev=0d3f25df6d0e76b6c6f23d6e17172142b50c715c)",
+ "pliron",
  "tempfile",
  "thiserror",
 ]
@@ -188,8 +188,8 @@ dependencies = [
  "combine",
  "linkme",
  "once_cell",
- "pliron 0.16.0 (git+https://github.com/pliron-org/pliron?rev=0d3f25df6d0e76b6c6f23d6e17172142b50c715c)",
- "pliron-derive 0.16.0 (git+https://github.com/pliron-org/pliron?rev=0d3f25df6d0e76b6c6f23d6e17172142b50c715c)",
+ "pliron",
+ "pliron-derive",
  "thiserror",
 ]
 
@@ -202,8 +202,8 @@ dependencies = [
  "dialect-mir",
  "dyn-clone",
  "linkme",
- "pliron 0.16.0 (git+https://github.com/pliron-org/pliron?rev=0d3f25df6d0e76b6c6f23d6e17172142b50c715c)",
- "pliron-derive 0.16.0 (git+https://github.com/pliron-org/pliron?rev=0d3f25df6d0e76b6c6f23d6e17172142b50c715c)",
+ "pliron",
+ "pliron-derive",
  "thiserror",
 ]
 
@@ -329,7 +329,7 @@ checksum = "77060ebe535362c3da75682cd17b0431017b6e7c5661e714fc69a7ad017d1301"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn",
 ]
 
 [[package]]
@@ -348,8 +348,8 @@ dependencies = [
  "dyn-clone",
  "linkme",
  "log",
- "pliron 0.16.0 (git+https://github.com/pliron-org/pliron?rev=0d3f25df6d0e76b6c6f23d6e17172142b50c715c)",
- "pliron-derive 0.16.0 (git+https://github.com/pliron-org/pliron?rev=0d3f25df6d0e76b6c6f23d6e17172142b50c715c)",
+ "pliron",
+ "pliron-derive",
  "pliron-llvm",
  "reserved-oxide-symbols",
  "rustc-hash",
@@ -386,8 +386,8 @@ dependencies = [
  "dialect-mir",
  "dialect-nvvm",
  "llvm-export",
- "pliron 0.16.0 (git+https://github.com/pliron-org/pliron?rev=0d3f25df6d0e76b6c6f23d6e17172142b50c715c)",
- "pliron-derive 0.16.0 (git+https://github.com/pliron-org/pliron?rev=0d3f25df6d0e76b6c6f23d6e17172142b50c715c)",
+ "pliron",
+ "pliron-derive",
  "reserved-oxide-symbols",
  "rustc-hash",
  "thiserror",
@@ -399,7 +399,7 @@ version = "0.2.1"
 source = "git+https://github.com/NVlabs/cuda-oxide?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
 dependencies = [
  "dialect-mir",
- "pliron 0.16.0 (git+https://github.com/pliron-org/pliron?rev=0d3f25df6d0e76b6c6f23d6e17172142b50c715c)",
+ "pliron",
  "rustc-hash",
  "thiserror",
 ]
@@ -410,7 +410,7 @@ version = "0.2.1"
 source = "git+https://github.com/NVlabs/cuda-oxide?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
 dependencies = [
  "llvm-export",
- "pliron 0.16.0 (git+https://github.com/pliron-org/pliron?rev=0d3f25df6d0e76b6c6f23d6e17172142b50c715c)",
+ "pliron",
 ]
 
 [[package]]
@@ -428,30 +428,6 @@ checksum = "5a6298074a1742b584aaca148a6c61ecb27f0b55fdf237c235939c84924377a1"
 [[package]]
 name = "pliron"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a164e4edeaf30b4edfac40d75818098795aa80440d7083938e9ce8081937849"
-dependencies = [
- "awint",
- "combine",
- "downcast-rs",
- "dyn-clone",
- "hashbrown",
- "hi_sparse_bitset",
- "inventory",
- "linkme",
- "log",
- "pliron-derive 0.16.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "regex",
- "rustc-hash",
- "rustc_apfloat",
- "slotmap",
- "spin",
- "thiserror",
-]
-
-[[package]]
-name = "pliron"
-version = "0.16.0"
 source = "git+https://github.com/pliron-org/pliron?rev=0d3f25df6d0e76b6c6f23d6e17172142b50c715c#0d3f25df6d0e76b6c6f23d6e17172142b50c715c"
 dependencies = [
  "awint",
@@ -464,7 +440,7 @@ dependencies = [
  "linkme",
  "log",
  "once_vec",
- "pliron-derive 0.16.0 (git+https://github.com/pliron-org/pliron?rev=0d3f25df6d0e76b6c6f23d6e17172142b50c715c)",
+ "pliron-derive",
  "regex",
  "rustc-hash",
  "rustc_apfloat",
@@ -477,20 +453,6 @@ dependencies = [
 [[package]]
 name = "pliron-derive"
 version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df85990dc7ef664eaa0d5a19fd4283ba4e4f7328258278d7493861d8afc7608f"
-dependencies = [
- "combine",
- "convert_case",
- "proc-macro2",
- "quote",
- "rustc-hash",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "pliron-derive"
-version = "0.16.0"
 source = "git+https://github.com/pliron-org/pliron?rev=0d3f25df6d0e76b6c6f23d6e17172142b50c715c#0d3f25df6d0e76b6c6f23d6e17172142b50c715c"
 dependencies = [
  "combine",
@@ -498,7 +460,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rustc-hash",
- "syn 3.0.3",
+ "syn",
 ]
 
 [[package]]
@@ -508,7 +470,7 @@ source = "git+https://github.com/pliron-org/pliron?rev=0d3f25df6d0e76b6c6f23d6e1
 dependencies = [
  "bitflags",
  "log",
- "pliron 0.16.0 (git+https://github.com/pliron-org/pliron?rev=0d3f25df6d0e76b6c6f23d6e17172142b50c715c)",
+ "pliron",
  "thiserror",
 ]
 
@@ -652,17 +614,6 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.119"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297"
-dependencies = [
- "proc-macro2",
- "quote",
- "unicode-ident",
-]
-
-[[package]]
-name = "syn"
 version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
@@ -702,7 +653,7 @@ checksum = "43cbfe0cf76104d42a574802844187e84a305e531ed54455f11fbde0f10541cd"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 3.0.3",
+ "syn",
 ]
 
 [[package]]
