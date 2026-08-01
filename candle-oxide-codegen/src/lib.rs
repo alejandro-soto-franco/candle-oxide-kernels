@@ -8,6 +8,7 @@ pub mod desc;
 pub mod emit;
 pub mod index;
 pub mod testing;
+pub mod unary;
 
 use cuda_oxide_codegen::experimental::{
     CodegenModule, CompileError, CompileOptions, Compiler, Linking, Target,
@@ -36,7 +37,7 @@ pub fn build_family(family: Family, ops: &[OpDesc], target: &str) -> Result<Stri
         );
         match op.arity {
             Arity::Binary => binary::build_binary(&mut module, op),
-            Arity::Unary => unimplemented!("unary arrives in Task 6"),
+            Arity::Unary => unary::build_unary(&mut module, op),
         }
     }
 
