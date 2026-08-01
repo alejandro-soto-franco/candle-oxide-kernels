@@ -1,0 +1,15 @@
+[package]
+name = "candle-oxide-codegen"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+description = "Builds Candle's elementwise CUDA kernels through the cuda-oxide standalone PTX API"
+
+# Pinned to cuda-oxide rev 0810ba95ff9dcf1ca379b779d3ebe33a8899b15d, resolved
+# as git dependencies (this form worked against `cargo fetch`).
+[dependencies]
+cuda-oxide-codegen = { git = "https://github.com/NVlabs/cuda-oxide", rev = "0810ba95ff9dcf1ca379b779d3ebe33a8899b15d" }
+dialect-mir = { git = "https://github.com/NVlabs/cuda-oxide", rev = "0810ba95ff9dcf1ca379b779d3ebe33a8899b15d" }
+dialect-nvvm = { git = "https://github.com/NVlabs/cuda-oxide", rev = "0810ba95ff9dcf1ca379b779d3ebe33a8899b15d" }
+pliron = "0.16.0"
