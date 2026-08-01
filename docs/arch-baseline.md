@@ -3,10 +3,10 @@
 The committed PTX under `candle-oxide-kernels/ptx/` targets `sm_75`. `sm_80`
 was the placeholder set before this measurement existed. PTX is
 forward-compatible: the CUDA driver JITs a module built at an older baseline
-up to whatever architecture the running GPU implements, so the question is
-not correctness but the JIT cost paid on first load of a module built below
-the GPU's own architecture, and, separately, whether `sm_75` codegen agrees
-with `sm_80` codegen at all. Both are addressed below.
+up to whatever architecture the running GPU implements. Two questions
+follow: the JIT cost paid on first load of a module built below the GPU's
+own architecture, and, separately, whether `sm_75` codegen agrees with
+`sm_80` codegen at all. Both are addressed below.
 
 ## Method
 
@@ -35,7 +35,7 @@ Candle's own build. Context creation happens before the timer starts, so the
 measurement isolates module load, not device or driver initialisation.
 
 Each sample is a fresh process invocation with `CUDA_CACHE_DISABLE=1`, so
-every sample is a genuine JIT rather than a hit against the on-disk ptxas
+every sample runs the actual JIT rather than hitting the on-disk ptxas
 JIT cache (`~/.nv/ComputeCache`), which would otherwise serve every run
 after the first from disk and hide the cost the measurement exists to find.
 Three samples per baseline; medians reported.
@@ -88,7 +88,8 @@ exercising the forward-compatibility path).
 
 `sm_75` and `sm_80` are different code-generation targets, so the earlier
 bit-exactness evidence, gathered against `sm_80` PTX, does not automatically
-carry over. Re-run after regenerating:
+carry over, and revalidating after regenerating was the right call before
+the next paragraph's finding was known. Re-run after regenerating:
 
 - The workspace test suite (`cargo test --workspace` in `$REPO`):
   27 tests pass, including `regenerating_reproduces_the_committed_artifacts`
@@ -110,6 +111,17 @@ carry over. Re-run after regenerating:
 measurement. The xtask can still emit any architecture on demand
 (`cargo xtask gen-ptx --arch <target> --out <dir>`), so a future baseline
 change follows the same regenerate-and-revalidate path.
+
+A direct diff of the previous committed `sm_80` PTX against the regenerated
+`sm_75` PTX sharpens this further: the two differ by four lines per file
+(two removed, two added), the `.version` and `.target` directives, and
+nothing else. The instruction stream is byte-identical between `sm_75` and
+`sm_80` for this kernel set. The baseline is a compatibility declaration in
+the PTX header rather than a code-generation choice here, so the breadth of
+hardware support `sm_75` buys comes at no cost, measured or structural. The
+revalidation above still stands as the correct thing to have done: that
+result was not known in advance of running it, and a future entry whose
+codegen is arch-sensitive would show up the same way this one didn't.
 
 ## The `.align 1` pointer annotation
 

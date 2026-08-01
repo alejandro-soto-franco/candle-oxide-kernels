@@ -7,10 +7,24 @@
 //! `sha256sum` matching across two separate `--out` directories and against
 //! the committed files). If a future change to the codegen makes output
 //! depend on wall-clock time, an absolute path, or hash-ordered iteration,
-//! this test starts failing intermittently rather than on genuine drift.
+//! this test starts failing intermittently rather than on drift alone.
 //! Treat that as a codegen bug to fix; the comparison here stays exact.
 
 use std::process::Command;
+
+/// The architecture declared on a PTX file's own `.target` line, e.g.
+/// `sm_75` from `.target sm_75`.
+///
+/// Reads the baseline from the committed artifact itself rather than from a
+/// literal held in this test, so the test cannot drift from what is
+/// actually shipped: whatever `cargo xtask gen-ptx` last wrote here is what
+/// gets regenerated and compared against.
+fn declared_target(ptx: &str) -> &str {
+    ptx.lines()
+        .find_map(|line| line.strip_prefix(".target "))
+        .unwrap_or_else(|| panic!("no `.target` line found in:\n{ptx}"))
+        .trim()
+}
 
 /// Compare `got` against the committed `want` for `name`, panicking with a
 /// compact report rather than `assert_eq!`'s full-string dump.
@@ -66,12 +80,23 @@ fn regenerating_reproduces_the_committed_artifacts() {
         .unwrap_or(0);
     let fresh = std::env::temp_dir().join(format!("xtask_repro_{}_{}", std::process::id(), unique));
 
-    // Must track the baseline actually committed under `candle-oxide-kernels/ptx/`,
-    // decided and recorded in `docs/arch-baseline.md`. This is the one test that
-    // reads the committed artifacts rather than building its own reference, so it
-    // is the one place this value has to move when the baseline does.
+    let committed_binary = std::fs::read_to_string(committed.join("binary.ptx")).unwrap();
+    let committed_unary = std::fs::read_to_string(committed.join("unary.ptx")).unwrap();
+
+    // The baseline to regenerate at comes from the committed artifact's own
+    // `.target` line, not a literal in this test, so this test cannot drift
+    // from whatever is actually shipped. Both families must agree: a torn
+    // pair here would mean the atomicity contract `write_family` documents
+    // has already been violated, which this test should catch too.
+    let arch = declared_target(&committed_binary);
+    assert_eq!(
+        arch,
+        declared_target(&committed_unary),
+        "binary.ptx and unary.ptx declare different .target architectures"
+    );
+
     let out = Command::new(env!("CARGO_BIN_EXE_xtask"))
-        .args(["gen-ptx", "--arch", "sm_75", "--out"])
+        .args(["gen-ptx", "--arch", arch, "--out"])
         .arg(&fresh)
         .output()
         .expect("xtask runs");
@@ -81,10 +106,12 @@ fn regenerating_reproduces_the_committed_artifacts() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    for name in ["binary.ptx", "unary.ptx"] {
-        let want = std::fs::read_to_string(committed.join(name)).unwrap();
+    for (name, want) in [
+        ("binary.ptx", &committed_binary),
+        ("unary.ptx", &committed_unary),
+    ] {
         let got = std::fs::read_to_string(fresh.join(name)).unwrap();
-        assert_matches_committed(name, &want, &got);
+        assert_matches_committed(name, want, &got);
     }
     let _ = std::fs::remove_dir_all(&fresh);
 }
