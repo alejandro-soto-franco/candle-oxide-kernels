@@ -71,13 +71,6 @@ pub enum Family {
 }
 
 impl Family {
-    pub fn module_name(self) -> &'static str {
-        match self {
-            Family::Binary => "oxide::binary",
-            Family::Unary => "oxide::unary",
-        }
-    }
-
     pub fn artifact(self) -> &'static str {
         match self {
             Family::Binary => "binary.ptx",

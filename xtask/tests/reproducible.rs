@@ -10,21 +10,8 @@
 //! this test starts failing intermittently rather than on drift alone.
 //! Treat that as a codegen bug to fix; the comparison here stays exact.
 
+use candle_oxide_codegen::testing::declared_target;
 use std::process::Command;
-
-/// The architecture declared on a PTX file's own `.target` line, e.g.
-/// `sm_75` from `.target sm_75`.
-///
-/// Reads the baseline from the committed artifact itself rather than from a
-/// literal held in this test, so the test cannot drift from what is
-/// actually shipped: whatever `cargo xtask gen-ptx` last wrote here is what
-/// gets regenerated and compared against.
-fn declared_target(ptx: &str) -> &str {
-    ptx.lines()
-        .find_map(|line| line.strip_prefix(".target "))
-        .unwrap_or_else(|| panic!("no `.target` line found in:\n{ptx}"))
-        .trim()
-}
 
 /// Compare `got` against the committed `want` for `name`, panicking with a
 /// compact report rather than `assert_eq!`'s full-string dump.

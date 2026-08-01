@@ -70,9 +70,12 @@ pub fn find_nvcc() -> PathBuf {
 
 /// Compile a `.cu` to PTX with nvcc and return the text. Mirrors the flags
 /// `candle-kernels/build.rs` passes on this branch: GCC 16's frontend trips
-/// on a builtin pulled in by system headers, so nvcc needs the compatibility
-/// pre-include and `--allow-unsupported-compiler` to accept the host
-/// compiler at all.
+/// on a builtin pulled in by system headers, so a checkout that carries
+/// `gcc16_cuda_compat.h` needs the compatibility pre-include and
+/// `--allow-unsupported-compiler` to accept the host compiler at all. A
+/// checkout without that file, such as upstream Candle, has no GCC 16
+/// trouble to work around, so the pre-include is added only when the file
+/// is present.
 pub fn nvcc_ptx_for(
     cu_path: &std::path::Path,
     include_dir: &std::path::Path,
@@ -90,12 +93,15 @@ pub fn nvcc_ptx_for(
     std::fs::create_dir_all(&dir).unwrap();
     let out = dir.join("reference.ptx");
     let compat_header = include_dir.join("gcc16_cuda_compat.h");
-    let result = std::process::Command::new(find_nvcc())
+    let mut command = std::process::Command::new(find_nvcc());
+    command
         .arg("--ptx")
         .arg(format!("-arch={arch}"))
-        .arg("--allow-unsupported-compiler")
-        .arg("--pre-include")
-        .arg(&compat_header)
+        .arg("--allow-unsupported-compiler");
+    if compat_header.exists() {
+        command.arg("--pre-include").arg(&compat_header);
+    }
+    let result = command
         .arg("--expt-relaxed-constexpr")
         .arg("-std=c++17")
         .arg("-O3")
@@ -133,6 +139,19 @@ pub fn entry_params(ptx: &str, entry: &str) -> Vec<String> {
         .filter(|line| line.contains(".param"))
         .map(|line| line.trim().trim_end_matches(',').to_string())
         .collect()
+}
+
+/// The architecture declared on a PTX file's own `.target` line, e.g.
+/// `sm_75` from `.target sm_75`.
+///
+/// Reads the baseline from the PTX text itself rather than from a literal
+/// held by the caller, so a caller comparing against or reassembling a
+/// committed artifact cannot drift from what is actually declared in it.
+pub fn declared_target(ptx: &str) -> &str {
+    ptx.lines()
+        .find_map(|line| line.strip_prefix(".target "))
+        .unwrap_or_else(|| panic!("no `.target` line found in:\n{ptx}"))
+        .trim()
 }
 
 /// The PTX text of one entry point, from its `.visible .entry` line to the

@@ -1,4 +1,4 @@
-use candle_oxide_codegen::desc::{all_ops, Arity, Family, OutType};
+use candle_oxide_codegen::desc::{all_ops, Arity, OutType};
 
 #[test]
 fn the_table_covers_the_v1_surface() {
@@ -47,10 +47,4 @@ fn every_name_is_unique() {
         before,
         "entry-point names collide inside a module"
     );
-}
-
-#[test]
-fn module_names_are_namespaced() {
-    assert_eq!(Family::Binary.module_name(), "oxide::binary");
-    assert_eq!(Family::Unary.module_name(), "oxide::unary");
 }

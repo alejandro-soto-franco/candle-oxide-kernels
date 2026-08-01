@@ -13,8 +13,10 @@ use std::process::Command;
 /// `sm_00` parses as a syntactically valid `Target` and fails later, inside
 /// `compiler.compile(...)`, with a `CompileError` ("compute capability must
 /// contain at least two digits"). It does not exercise the xtask's
-/// `Target::parse` pre-check; `--arch bogus` does that (verified manually,
-/// see task-9-report.md).
+/// `Target::parse` pre-check; `--arch bogus` does that instead, since it is
+/// not even syntactically a target and `Target::parse` rejects it before
+/// `compiler.compile` is ever reached (verified manually, not covered by an
+/// automated test here because it exits before either family is built).
 #[test]
 fn a_failed_build_writes_nothing() {
     let dir = std::env::temp_dir().join(format!("xtask_atomicity_{}", std::process::id()));

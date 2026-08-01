@@ -30,18 +30,27 @@ use std::path::{Path, PathBuf};
 fn write_family(path: &Path, ptx: &str) -> std::io::Result<()> {
     let tmp = path.with_extension(format!("ptx.tmp.{}", std::process::id()));
     std::fs::write(&tmp, ptx)?;
-    std::fs::rename(&tmp, path)
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(error)
+        }
+    }
 }
 
 fn main() {
     let mut args = std::env::args().skip(1);
     let command = args.next().unwrap_or_default();
     if command != "gen-ptx" {
-        eprintln!("usage: cargo xtask gen-ptx [--arch sm_80] [--out <dir>]");
+        eprintln!("usage: cargo xtask gen-ptx [--arch sm_75] [--out <dir>]");
         std::process::exit(2);
     }
 
-    let mut arch = "sm_80".to_string();
+    // sm_75 is the shipped baseline (candle-oxide-kernels/ptx/*.ptx); an
+    // unqualified run must reproduce what is committed, not silently drop
+    // Turing support by defaulting somewhere else.
+    let mut arch = "sm_75".to_string();
     let mut out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../candle-oxide-kernels/ptx");
     while let Some(flag) = args.next() {
         match flag.as_str() {

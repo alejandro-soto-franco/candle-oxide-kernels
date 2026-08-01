@@ -8,7 +8,13 @@ This crate ships precompiled PTX for 46 entry points across two modules: `oxide:
 
 The committed PTX targets `sm_75` (Turing). Every load goes through the CUDA driver's PTX-to-SASS JIT regardless of GPU architecture, since this crate ships PTX text rather than a cubin; PTX is forward-compatible, so the driver JITs the same module up to whatever architecture the running GPU implements.
 
-Measurement in `docs/arch-baseline.md` found no measurable difference in first-load JIT cost between `sm_75`, `sm_80` and the running GPU's own architecture, so `sm_75` was chosen for hardware coverage back to Turing at the same cost. `cargo xtask gen-ptx --arch <target>` regenerates the PTX for any architecture without changing this crate's shape.
+`sm_75` and `sm_80` produce byte-identical instruction streams for this kernel set; the two PTX files differ only in their `.version` and `.target` header lines. The baseline is therefore a compatibility declaration, not a code-generation choice, and `sm_75` was picked for hardware coverage back to Turing at no cost. `cargo xtask gen-ptx --arch <target>` regenerates the PTX for any architecture without changing this crate's shape.
+
+Every pointer parameter carries a `.ptr .global .align 1` annotation, the most conservative alignment declaration possible. Neither this pipeline nor nvcc vectorises loads for these entries, so the annotation costs nothing: there is no wider load for it to inhibit.
+
+## Limitations
+
+`ucopy_f32` and `ucopy_f64` are declared in `UNARY_ENTRIES` and present in `unary.ptx`, but Candle's tensor API never reaches them: `copy_strided_src` loads `ucopy` from Candle's own stock kernel module rather than through `get_or_load_custom_func`. These two entries are unreachable through the tensor API today.
 
 ## Loading
 

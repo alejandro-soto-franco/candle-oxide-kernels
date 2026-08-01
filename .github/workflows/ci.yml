@@ -99,6 +99,18 @@ jobs:
       - name: Clone repository
         uses: actions/checkout@v4
 
+      # abi_diff.rs compares the builder's PTX against nvcc's own output for
+      # the same source, so it needs a copy of Candle's kernel sources.
+      # Upstream Candle carries no gcc16_cuda_compat.h (that pre-include
+      # exists only to work around a GCC 16 frontend issue on a personal
+      # branch), so nvcc_ptx_for adds it only when the file is present, and
+      # this checkout of upstream Candle compiles without it.
+      - name: Clone Candle for its kernel sources
+        uses: actions/checkout@v4
+        with:
+          repository: huggingface/candle
+          path: candle
+
       # candle-oxide-codegen and xtask depend on cuda-oxide-codegen,
       # dialect-mir, dialect-nvvm and pliron, all pinned to
       # NVlabs/cuda-oxide rev 0810ba95ff9dcf1ca379b779d3ebe33a8899b15d (see
@@ -144,4 +156,5 @@ jobs:
       - name: Run candle-oxide-codegen and xtask tests
         env:
           CUDA_TOOLKIT_PATH: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}
+          CANDLE_KERNELS_SRC: ${{ github.workspace }}/candle/candle-kernels/src
         run: cargo test -p candle-oxide-codegen -p xtask

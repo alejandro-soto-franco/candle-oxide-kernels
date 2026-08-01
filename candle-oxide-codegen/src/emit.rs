@@ -2,7 +2,6 @@
 //! spike at `cuda-oxide/crates/cuda-oxide-codegen/tests/candle_badd_spike.rs`.
 
 use crate::desc::{DType, OutType};
-use cuda_oxide_codegen::experimental::CodegenModule;
 use dialect_mir::attributes::MirCastKindAttr;
 use dialect_mir::ops::{MirCastOp, MirCondBranchOp, MirConstantOp, MirFloatConstantOp, MirGotoOp};
 use dialect_mir::types::MirPtrType;
@@ -238,6 +237,3 @@ pub fn module_block(ctx: &mut Context, module: &impl Op) -> Ptr<BasicBlock> {
         }
     }
 }
-
-/// Re-exported so callers need not depend on cuda-oxide-codegen directly.
-pub type Module = CodegenModule;

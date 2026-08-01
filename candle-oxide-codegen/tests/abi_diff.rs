@@ -4,10 +4,11 @@ use candle_oxide_codegen::testing::{entry_params, nvcc_ptx_for};
 
 /// Candle's kernel sources, the reference this crate replaces.
 fn candle_kernels_src() -> std::path::PathBuf {
-    std::path::PathBuf::from(std::env::var("CANDLE_KERNELS_SRC").unwrap_or_else(|_| {
-        format!(
-            "{}/candle/candle-kernels/src",
-            std::env::var("HOME").unwrap()
+    let var = "CANDLE_KERNELS_SRC";
+    std::path::PathBuf::from(std::env::var(var).unwrap_or_else(|_| {
+        panic!(
+            "{var} is not set; point it at a checkout of candle-kernels/src \
+             (for example a `huggingface/candle` clone's `candle-kernels/src`)"
         )
     }))
 }

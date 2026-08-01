@@ -1,11 +1,13 @@
 use candle_oxide_codegen::build_family;
 use candle_oxide_codegen::desc::{binary_ops, Family};
-use candle_oxide_codegen::testing::assert_ptxas_accepts;
+use candle_oxide_codegen::testing::{assert_ptxas_accepts, entry_body};
 
-/// A SINGLE-entry module. Every assertion below uses a bare `ptx.contains`
-/// or a bare count, which is sound only because the module holds one entry.
-/// Widening this filter silently turns those assertions module-scoped, the
-/// defect Task 4 fixed by introducing `testing::entry_body`.
+/// A SINGLE-entry module. Every assertion below that uses a bare
+/// `ptx.contains` or a bare count is sound only because the module holds
+/// one entry; widening this filter would silently turn those assertions
+/// module-scoped rather than entry-scoped. `testing::entry_body` exists so
+/// an assertion can be scoped explicitly instead of relying on the module
+/// holding one entry.
 fn badd_only() -> Vec<candle_oxide_codegen::desc::OpDesc> {
     binary_ops()
         .into_iter()
@@ -44,12 +46,27 @@ fn each_strided_path_decomposes_its_own_index() {
 #[test]
 fn the_null_strides_pointer_is_tested() {
     let ptx = build_family(Family::Binary, &badd_only(), "sm_80").unwrap();
+    let body = entry_body(&ptx, "badd_f32");
     // `dims_and_strides == nullptr` selects the contiguous path without
-    // dereferencing, so the parameter is compared against zero.
-    assert!(
-        ptx.contains("setp.eq.s64") || ptx.contains("setp.eq.b64") || ptx.contains("setp.ne.s64"),
-        "the null check on dims_and_strides is missing:\n{ptx}"
-    );
+    // dereferencing, so the very first predicate in the entry must be an
+    // equality test of the strides pointer against the literal 0, before
+    // anything is dereferenced. `is_contiguous`'s own decomposition loop
+    // emits `setp.ne` comparisons of its own (a non-zero remainder check),
+    // so accepting any `setp.ne.s64` in the whole body passes even with
+    // this null check deleted; requiring the first predicate specifically
+    // does not.
+    let first_setp = body
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("setp."));
+    match first_setp {
+        Some(line) => assert!(
+            line.starts_with("setp.eq.b64") && line.trim_end_matches(';').ends_with(", 0"),
+            "the first predicate in the entry must be `dims_and_strides == 0`, \
+             saw `{line}`:\n{body}"
+        ),
+        None => panic!("no predicate found before any load:\n{body}"),
+    }
 }
 
 #[test]

@@ -26,13 +26,21 @@ fn uneg_f32_declares_candle_five_word_abi() {
 }
 
 #[test]
-fn the_in_place_branch_reads_the_output_buffer() {
+fn the_in_place_branch_selects_between_input_and_output_addresses() {
     let ptx = build_family(Family::Unary, &pick(&["ucopy_f32"]), "sm_80").unwrap();
-    // `inp ? inp[i] : out[i]` means the kernel loads from the output pointer
-    // on one path, so a global load and a global store both name it.
-    assert!(
-        ptx.contains("ld.global"),
-        "the in-place branch loads:\n{ptx}"
+    let body = entry_body(&ptx, "ucopy_f32");
+    // `inp ? inp[i] : out[i]` lowers to a null check on the input pointer
+    // followed by an address select (`selp.b64`) between the input and
+    // output pointers, feeding a single load from whichever address won.
+    // The contiguous and strided loops each perform this once, so both
+    // `selp.b64` sites must be present; `ptx.contains("ld.global")` alone
+    // passes on every kernel in this crate and proves nothing about the
+    // in-place branch specifically.
+    let selects = body.matches("selp.b64").count();
+    assert_eq!(
+        selects, 2,
+        "expected one input/output address select per loop (contiguous and \
+         strided), saw {selects}:\n{body}"
     );
     assert_ptxas_accepts(ptx.as_bytes(), "unary_ucopy", "sm_80");
 }

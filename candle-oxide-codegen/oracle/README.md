@@ -28,37 +28,38 @@ whose arithmetic the builder emits itself (`badd`, `bsub`, `bmul`, `bdiv`,
 
 ## Provenance
 
-- Source: `$ORACLE_SRC`, `src/main.rs`, at commit `91334cc` on
-  branch `feat/oracle-elementwise`.
+- Source: `$ORACLE_SRC` (a checkout of `candle-oxide-kernel`), `src/main.rs`,
+  at commit `91334cc` on branch `feat/oracle-elementwise`.
 - Toolchain: `nightly-2026-04-03` (`rustc 1.96.0-nightly 55e86c996`,
   LLVM 22.1.2), pinned by that crate's `rust-toolchain.toml`.
 - cuda-oxide revision: `0810ba95`, the same revision this crate builds
   against. `candle-oxide-kernel` takes `cuda-device`, `cuda-host` and
-  `cuda-core` by path from `$CUDA_OXIDE`, a detached worktree at that
-  revision.
+  `cuda-core` by path from `$CUDA_OXIDE` (a checkout of cuda-oxide at that
+  revision, kept outside this repository).
 - Codegen backend: `librustc_codegen_cuda.so` built from
-  `$CUDA_OXIDE/crates/rustc-codegen-cuda` at the same revision and
-  passed through `CUDA_OXIDE_BACKEND`. The shared cache at
-  `~/.cargo/cuda-oxide/` holds a build from an unrelated branch and must not
-  be used for this: the two revisions disagree on five of the thirty entries,
-  which would make any comparison against them unreadable.
+  `$CUDA_OXIDE/crates/rustc-codegen-cuda` at the same revision and passed
+  through `CUDA_OXIDE_BACKEND`. A backend cache shared with another branch
+  must not be used for this: the two revisions disagree on five of the
+  thirty entries, which would make any comparison against them unreadable.
+  Build the backend fresh into a target directory dedicated to this
+  revision.
 - Target: `sm_80`, matching `build_family`'s target in the test.
 
 ## Command
 
 ```bash
-cd $CUDA_OXIDE/crates/rustc-codegen-cuda
-CARGO_TARGET_DIR=<backend target directory> \
+cd "$CUDA_OXIDE/crates/rustc-codegen-cuda"
+CARGO_TARGET_DIR=<a target directory dedicated to this cuda-oxide revision> \
 LIBRARY_PATH="$(rustc --print sysroot)/lib" \
 LD_LIBRARY_PATH="$(rustc --print sysroot)/lib" \
   cargo build --lib --target x86_64-unknown-linux-gnu
 
-cd $ORACLE_SRC
-CUDA_OXIDE_BACKEND=<backend target directory>/x86_64-unknown-linux-gnu/debug/librustc_codegen_cuda.so \
+cd "$ORACLE_SRC"
+CUDA_OXIDE_BACKEND=<that target directory>/x86_64-unknown-linux-gnu/debug/librustc_codegen_cuda.so \
   cargo oxide build --arch sm_80
 # writes candle_oxide_kernel.ptx at the crate root; scripts/split_oracle.py
 # slices it into this directory.
-python3 $ORACLE_SRC/scripts/split_oracle.py
+python3 "$ORACLE_SRC/scripts/split_oracle.py"
 ```
 
 ## Coverage

@@ -24,8 +24,8 @@ use std::collections::BTreeSet;
 
 /// Mnemonic heads that carry floating-point computation. Loads, stores and
 /// moves are excluded: they say where a value came from, never what was
-/// computed, and Task 4 recorded that their type suffix is spelled differently
-/// by different code generators.
+/// computed, and their type suffix is spelled differently by different code
+/// generators, which would make comparing them noise rather than signal.
 const ARITHMETIC: &[&str] = &[
     "abs", "add", "copysign", "cvt", "div", "ex2", "fma", "lg2", "mad", "max", "min", "mul", "neg",
     "rcp", "rsqrt", "selp", "setp", "sqrt", "sub", "testp",

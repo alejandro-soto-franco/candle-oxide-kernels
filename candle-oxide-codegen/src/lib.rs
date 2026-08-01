@@ -48,6 +48,12 @@ pub fn build_family(family: Family, ops: &[OpDesc], target: &str) -> Result<Stri
         .with_linking(if needs_libdevice {
             Linking::Libdevice
         } else {
+            // Unreachable today: both families always contain at least one
+            // libdevice-backed op (`bmaximum`/`bminimum` in binary; `uexp`,
+            // `ulog`, `usin`, `ucos`, `usqrt` in unary), so `needs_libdevice`
+            // is always true for `all_ops()`-derived sets. Kept for a future
+            // op set built entirely from this crate's own arithmetic, with
+            // no libdevice call in it.
             Linking::SelfContained
         });
 
