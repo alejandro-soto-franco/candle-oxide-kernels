@@ -51,3 +51,20 @@ pub fn assert_ptxas_accepts(ptx: &[u8], label: &str, arch: &str) {
         String::from_utf8_lossy(ptx)
     );
 }
+
+/// The PTX text of one entry point, from its `.visible .entry` line to the
+/// closing brace of its body. Panics if the entry is absent, since every
+/// caller is asserting something about an entry it expects to exist.
+pub fn entry_body<'a>(ptx: &'a str, entry: &str) -> &'a str {
+    let needle = format!(".visible .entry {entry}(");
+    let start = ptx
+        .find(&needle)
+        .unwrap_or_else(|| panic!("entry {entry} is absent from the module"));
+    let rest = &ptx[start..];
+    // Entry bodies close with a brace at column 0.
+    let end = rest
+        .find("\n}")
+        .map(|offset| start + offset + 2)
+        .unwrap_or(ptx.len());
+    &ptx[start..end]
+}

@@ -1,6 +1,6 @@
 use candle_oxide_codegen::build_family;
 use candle_oxide_codegen::desc::{binary_ops, Family};
-use candle_oxide_codegen::testing::assert_ptxas_accepts;
+use candle_oxide_codegen::testing::{assert_ptxas_accepts, entry_body};
 
 #[test]
 fn every_binary_entry_compiles_into_one_module() {
@@ -17,11 +17,21 @@ fn every_binary_entry_compiles_into_one_module() {
 }
 
 #[test]
-fn arithmetic_lowers_to_the_expected_instructions() {
+fn each_arithmetic_entry_lowers_to_its_own_instruction() {
     let ops = binary_ops();
     let ptx = build_family(Family::Binary, &ops, "sm_80").unwrap();
-    for want in ["add.f32", "sub.f32", "mul.f32", "div.rn.f32", "add.f64", "div.rn.f64"] {
-        assert!(ptx.contains(want), "{want} missing:\n{ptx}");
+    for (entry, mnemonic) in [
+        ("badd_f32", "add.f32"),
+        ("bsub_f32", "sub.f32"),
+        ("bmul_f32", "mul.f32"),
+        ("bdiv_f32", "div.rn.f32"),
+        ("badd_f64", "add.f64"),
+        ("bsub_f64", "sub.f64"),
+        ("bmul_f64", "mul.f64"),
+        ("bdiv_f64", "div.rn.f64"),
+    ] {
+        let body = entry_body(&ptx, entry);
+        assert!(body.contains(mnemonic), "{entry} must lower to {mnemonic}:\n{body}");
     }
 }
 
@@ -46,18 +56,48 @@ fn libdevice_min_and_max_resolved_at_link_time() {
 }
 
 #[test]
+fn bmaximum_and_bminimum_lower_to_distinct_instructions() {
+    let ops = binary_ops();
+    let ptx = build_family(Family::Binary, &ops, "sm_80").unwrap();
+    // The resolved libdevice call surfaces as `max.fN`/`min.fN` after
+    // Linking::Libdevice inlines it; verified against the actual PTX rather
+    // than assumed.
+    for (max_entry, min_entry, max_mnemonic, min_mnemonic) in [
+        ("bmaximum_f32", "bminimum_f32", "max.f32", "min.f32"),
+        ("bmaximum_f64", "bminimum_f64", "max.f64", "min.f64"),
+    ] {
+        let max_body = entry_body(&ptx, max_entry);
+        let min_body = entry_body(&ptx, min_entry);
+        assert!(
+            max_body.contains(max_mnemonic) && !max_body.contains(min_mnemonic),
+            "{max_entry} must lower to {max_mnemonic}, not {min_mnemonic}:\n{max_body}"
+        );
+        assert!(
+            min_body.contains(min_mnemonic) && !min_body.contains(max_mnemonic),
+            "{min_entry} must lower to {min_mnemonic}, not {max_mnemonic}:\n{min_body}"
+        );
+    }
+}
+
+#[test]
 fn comparisons_store_one_byte() {
+    let stems = ["eq", "ne", "lt", "le", "gt", "ge"];
     let ops: Vec<_> = binary_ops()
         .into_iter()
-        .filter(|op| op.name.starts_with("lt_") || op.name.starts_with("ge_"))
+        .filter(|op| stems.iter().any(|stem| op.name.starts_with(&format!("{stem}_"))))
         .collect();
+    assert_eq!(ops.len(), 12, "expected all six comparison kinds at both dtypes");
     let ptx = build_family(Family::Binary, &ops, "sm_80").unwrap();
     // Candle's BINARY_OP_OUT writes `uint8_t`, so the store must be one byte
     // wide. nvcc spells that `st.global.u8` and the LLVM NVPTX backend spells
     // it `st.global.b8`; PTX treats the two identically for `st`.
-    assert!(
-        ptx.contains("st.global.u8") || ptx.contains("st.global.b8"),
-        "comparison writes a byte:\n{ptx}"
-    );
+    for op in &ops {
+        let body = entry_body(&ptx, &op.name);
+        assert!(
+            body.contains("st.global.u8") || body.contains("st.global.b8"),
+            "{} must store one byte:\n{body}",
+            op.name
+        );
+    }
     assert_ptxas_accepts(ptx.as_bytes(), "binary_cmp", "sm_80");
 }
