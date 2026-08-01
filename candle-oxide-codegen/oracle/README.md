@@ -7,13 +7,29 @@ reads them, so regenerating is a diff.
 
 These entries are written in Rust and lowered through cuda-oxide's rustc
 `#[kernel]` frontend, a different route from the standalone MIR builder this
-crate uses. Agreement on the arithmetic is therefore evidence from two
-independent frontends, not one pipeline checked against itself.
+crate uses.
+
+What agreement establishes is narrower than "two independent derivations", and
+it varies by op. The two routes share LLVM 22 and, for every libdevice-backed
+op, they share the libdevice bitcode itself: the builder names `__nv_expf`,
+`__nv_logf`, `__nv_sinf`, `__nv_cosf`, `__nv_sqrtf` and `__nv_fabsf` directly,
+the oracle reaches the same symbols through Rust intrinsic placeholders, and
+the same LLVM inlines the same bitcode on both sides. A 22-to-35 instruction
+match on `usin`, `ucos`, `uexp` or `ulog` therefore confirms that both routes
+picked the same libdevice symbol, which is the real risk in the op table, and
+carries no information about the polynomial itself, which is one shared
+artefact. `ulog_f32.ptx` holds no `lg2` on either side, only that shared
+inlined expansion.
+
+Agreement is evidence about symbol selection, about the operation each entry
+performs, and about the surrounding grid-stride loop and ABI. For the ops
+whose arithmetic the builder emits itself (`badd`, `bsub`, `bmul`, `bdiv`,
+`ucopy`, `uneg`, `usqr`) it is evidence about the arithmetic too.
 
 ## Provenance
 
-- Source: `$ORACLE_SRC`, branch `feat/oracle-elementwise`,
-  `src/main.rs`.
+- Source: `$ORACLE_SRC`, `src/main.rs`, at commit `91334cc` on
+  branch `feat/oracle-elementwise`.
 - Toolchain: `nightly-2026-04-03` (`rustc 1.96.0-nightly 55e86c996`,
   LLVM 22.1.2), pinned by that crate's `rust-toolchain.toml`.
 - cuda-oxide revision: `0810ba95`, the same revision this crate builds

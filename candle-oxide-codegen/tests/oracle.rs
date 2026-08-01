@@ -5,7 +5,11 @@
 //! lowers them through cuda-oxide's rustc codegen backend. Its PTX is checked
 //! in under `oracle/`, one file per entry, so this test needs no device
 //! toolchain and drift shows up as a diff. `oracle/README.md` records the
-//! command, the toolchain and the cuda-oxide revision behind those files.
+//! command, the toolchain and the cuda-oxide revision behind those files, and
+//! what agreement does and does not establish: the two routes share LLVM and,
+//! for every libdevice-backed op, the libdevice bitcode, so a match on
+//! `usin`/`ucos`/`uexp`/`ulog` confirms symbol selection, leaving the
+//! arithmetic behind those symbols unchecked.
 //!
 //! `utanh`, `urecip` and the twelve comparison entries have no oracle: Rust
 //! routes `f32::tanh` through libm rather than a `core::intrinsics`
@@ -116,6 +120,21 @@ fn the_builder_agrees_with_the_kernel_frontend() {
                         "{} should select on setp.{predicate}.{dtype} in the oracle, found {want:?}",
                         op.name
                     );
+                    // The NaN guard carries the whole verdict above. The oracle
+                    // tests `setp.nan.{dtype} %p, %r, %r` on each operand before
+                    // the compare, so a NaN lhs selects rhs, a NaN rhs leaves
+                    // `setp.{predicate}` unordered-false and selects lhs, and two
+                    // NaNs return rhs. That is IEEE maxNum, which is what
+                    // `fmaxf` and the builder's `{native}.{dtype}` compute. A
+                    // bare compare and select would keep every mnemonic asserted
+                    // above and still disagree with nvcc on NaN inputs, so the
+                    // guard is required explicitly.
+                    assert!(
+                        want.contains(&format!("setp.nan.{dtype}")),
+                        "{} lost its NaN guard in the oracle, so the compare and \
+                         select no longer computes maxNum: {want:?}",
+                        op.name
+                    );
                 }
                 _ => assert_eq!(got, want, "{} disagrees with the #[kernel] oracle", op.name),
             }
@@ -125,6 +144,6 @@ fn the_builder_agrees_with_the_kernel_frontend() {
 
     assert!(
         compared >= 30,
-        "only {compared} entries had an oracle to compare against"
+        "only {compared} entries had an oracle for the comparison"
     );
 }
