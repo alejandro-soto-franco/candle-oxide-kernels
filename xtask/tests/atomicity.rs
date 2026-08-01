@@ -29,7 +29,10 @@ fn a_failed_build_writes_nothing() {
         .output()
         .expect("xtask runs");
 
-    assert!(!status.status.success(), "an invalid arch must fail the run");
+    assert!(
+        !status.status.success(),
+        "an invalid arch must fail the run"
+    );
     assert_eq!(
         std::fs::read_to_string(&binary).unwrap(),
         "SENTINEL",

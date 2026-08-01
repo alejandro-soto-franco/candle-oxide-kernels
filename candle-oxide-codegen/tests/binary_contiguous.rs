@@ -14,7 +14,10 @@ fn badd(dtype: DType) -> OpDesc {
 #[test]
 fn badd_f32_declares_candle_six_word_abi() {
     let ptx = build_family(Family::Binary, &[badd(DType::F32)], "sm_80").unwrap();
-    assert!(ptx.contains(".visible .entry badd_f32("), "entry point missing:\n{ptx}");
+    assert!(
+        ptx.contains(".visible .entry badd_f32("),
+        "entry point missing:\n{ptx}"
+    );
     let params = ptx
         .lines()
         .skip_while(|line| !line.contains(".visible .entry badd_f32("))
@@ -27,7 +30,10 @@ fn badd_f32_declares_candle_six_word_abi() {
 #[test]
 fn badd_f64_compiles_too() {
     let ptx = build_family(Family::Binary, &[badd(DType::F64)], "sm_80").unwrap();
-    assert!(ptx.contains(".visible .entry badd_f64("), "entry point missing:\n{ptx}");
+    assert!(
+        ptx.contains(".visible .entry badd_f64("),
+        "entry point missing:\n{ptx}"
+    );
     assert!(ptx.contains("add.f64"), "f64 add lowers to add.f64:\n{ptx}");
 }
 

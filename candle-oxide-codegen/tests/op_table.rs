@@ -16,13 +16,18 @@ fn the_table_covers_the_v1_surface() {
     for stem in ["eq", "ne", "lt", "le", "gt", "ge"] {
         for suffix in ["f32", "f64"] {
             let want = format!("{stem}_{suffix}");
-            let op = ops.iter().find(|op| op.name == want).unwrap_or_else(|| panic!("missing {want}"));
+            let op = ops
+                .iter()
+                .find(|op| op.name == want)
+                .unwrap_or_else(|| panic!("missing {want}"));
             assert_eq!(op.out, OutType::U8, "{want} writes uint8_t");
             assert_eq!(op.arity, Arity::Binary);
         }
     }
     // 11 unary ops x 2 dtypes.
-    for stem in ["ucopy", "uneg", "usqr", "urecip", "uabs", "usqrt", "uexp", "ulog", "usin", "ucos", "utanh"] {
+    for stem in [
+        "ucopy", "uneg", "usqr", "urecip", "uabs", "usqrt", "uexp", "ulog", "usin", "ucos", "utanh",
+    ] {
         for suffix in ["f32", "f64"] {
             let want = format!("{stem}_{suffix}");
             assert!(names.contains(&want.as_str()), "missing {want}");
@@ -37,7 +42,11 @@ fn every_name_is_unique() {
     names.sort();
     let before = names.len();
     names.dedup();
-    assert_eq!(names.len(), before, "entry-point names collide inside a module");
+    assert_eq!(
+        names.len(),
+        before,
+        "entry-point names collide inside a module"
+    );
 }
 
 #[test]

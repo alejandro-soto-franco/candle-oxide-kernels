@@ -45,7 +45,11 @@ pub fn build_family(family: Family, ops: &[OpDesc], target: &str) -> Result<Stri
     let compiler = Compiler::discover().expect("LLVM 21+ llc and opt are installed");
     let options = CompileOptions::new(Target::parse(target).expect("valid target"))
         .with_fma_contraction(true)
-        .with_linking(if needs_libdevice { Linking::Libdevice } else { Linking::SelfContained });
+        .with_linking(if needs_libdevice {
+            Linking::Libdevice
+        } else {
+            Linking::SelfContained
+        });
 
     let ptx = compiler.compile(&mut module, &options)?.into_ptx();
     Ok(String::from_utf8(ptx).expect("PTX is utf-8"))

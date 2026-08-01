@@ -1,6 +1,6 @@
+use candle_oxide_codegen::build_family;
 use candle_oxide_codegen::desc::{binary_ops, Family};
 use candle_oxide_codegen::testing::assert_ptxas_accepts;
-use candle_oxide_codegen::build_family;
 
 #[test]
 fn ptxas_accepts_the_arithmetic_binary_entries() {

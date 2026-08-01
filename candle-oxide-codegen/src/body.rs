@@ -43,7 +43,14 @@ fn call(
 
 /// Cast a float value to another float width.
 fn fp_cast(ctx: &mut Context, block: Ptr<BasicBlock>, v: Value, to: TypeHandle) -> Value {
-    let op = Operation::new(ctx, MirCastOp::get_concrete_op_info(), vec![to], vec![v], vec![], 0);
+    let op = Operation::new(
+        ctx,
+        MirCastOp::get_concrete_op_info(),
+        vec![to],
+        vec![v],
+        vec![],
+        0,
+    );
     MirCastOp::new(op).set_attr_cast_kind(ctx, MirCastKindAttr::FloatToFloat);
     let res = op.deref(ctx).get_result(0);
     op.insert_at_back(block, ctx);
@@ -63,13 +70,55 @@ pub fn emit_body(
 ) -> Value {
     let f = tys.f;
     match op.body {
-        Body::Add => emit(ctx, block, MirAddOp::get_concrete_op_info(), vec![f], vec![xs[0], xs[1]]).unwrap(),
-        Body::Sub => emit(ctx, block, MirSubOp::get_concrete_op_info(), vec![f], vec![xs[0], xs[1]]).unwrap(),
-        Body::Mul => emit(ctx, block, MirMulOp::get_concrete_op_info(), vec![f], vec![xs[0], xs[1]]).unwrap(),
-        Body::Div => emit(ctx, block, MirDivOp::get_concrete_op_info(), vec![f], vec![xs[0], xs[1]]).unwrap(),
+        Body::Add => emit(
+            ctx,
+            block,
+            MirAddOp::get_concrete_op_info(),
+            vec![f],
+            vec![xs[0], xs[1]],
+        )
+        .unwrap(),
+        Body::Sub => emit(
+            ctx,
+            block,
+            MirSubOp::get_concrete_op_info(),
+            vec![f],
+            vec![xs[0], xs[1]],
+        )
+        .unwrap(),
+        Body::Mul => emit(
+            ctx,
+            block,
+            MirMulOp::get_concrete_op_info(),
+            vec![f],
+            vec![xs[0], xs[1]],
+        )
+        .unwrap(),
+        Body::Div => emit(
+            ctx,
+            block,
+            MirDivOp::get_concrete_op_info(),
+            vec![f],
+            vec![xs[0], xs[1]],
+        )
+        .unwrap(),
         Body::Copy => xs[0],
-        Body::Neg => emit(ctx, block, MirNegOp::get_concrete_op_info(), vec![f], vec![xs[0]]).unwrap(),
-        Body::Sqr => emit(ctx, block, MirMulOp::get_concrete_op_info(), vec![f], vec![xs[0], xs[0]]).unwrap(),
+        Body::Neg => emit(
+            ctx,
+            block,
+            MirNegOp::get_concrete_op_info(),
+            vec![f],
+            vec![xs[0]],
+        )
+        .unwrap(),
+        Body::Sqr => emit(
+            ctx,
+            block,
+            MirMulOp::get_concrete_op_info(),
+            vec![f],
+            vec![xs[0], xs[0]],
+        )
+        .unwrap(),
         // `recipg(float a) { return 1.0 / a; }` at cuda_utils.cuh:120. The
         // literal is a double, so the f32 form divides in double and rounds
         // once on return. `1.0f / a` would be a different function.
@@ -80,7 +129,14 @@ pub fn emit_body(
                 DType::F32 => fp_cast(ctx, block, xs[0], f64_ty),
                 DType::F64 => xs[0],
             };
-            let q = emit(ctx, block, MirDivOp::get_concrete_op_info(), vec![f64_ty], vec![one, x]).unwrap();
+            let q = emit(
+                ctx,
+                block,
+                MirDivOp::get_concrete_op_info(),
+                vec![f64_ty],
+                vec![one, x],
+            )
+            .unwrap();
             match op.dtype {
                 DType::F32 => fp_cast(ctx, block, q, f),
                 DType::F64 => q,

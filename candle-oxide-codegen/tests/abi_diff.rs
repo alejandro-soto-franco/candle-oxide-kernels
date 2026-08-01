@@ -5,7 +5,10 @@ use candle_oxide_codegen::testing::{entry_params, nvcc_ptx_for};
 /// Candle's kernel sources, the reference this crate replaces.
 fn candle_kernels_src() -> std::path::PathBuf {
     std::path::PathBuf::from(std::env::var("CANDLE_KERNELS_SRC").unwrap_or_else(|_| {
-        format!("{}/candle/candle-kernels/src", std::env::var("HOME").unwrap())
+        format!(
+            "{}/candle/candle-kernels/src",
+            std::env::var("HOME").unwrap()
+        )
     }))
 }
 
@@ -19,7 +22,10 @@ fn every_entry_matches_nvcc_parameter_shape() {
 
     for (family, cu) in reference {
         let nvcc_ptx = nvcc_ptx_for(&cu, &src, "sm_80");
-        let ops: Vec<_> = all_ops().into_iter().filter(|op| op.family() == family).collect();
+        let ops: Vec<_> = all_ops()
+            .into_iter()
+            .filter(|op| op.family() == family)
+            .collect();
         let ours = build_family(family, &ops, "sm_80").unwrap();
 
         for op in &ops {
@@ -93,8 +99,7 @@ fn every_entry_matches_nvcc_parameter_shape() {
                     // No pointer annotation on our side: nothing to
                     // normalise, the two declarations must agree exactly.
                     assert_eq!(
-                        got_shape,
-                        want_shape,
+                        got_shape, want_shape,
                         "{} word {index}: builder {got_shape:?} against nvcc {want_shape:?}",
                         op.name
                     );

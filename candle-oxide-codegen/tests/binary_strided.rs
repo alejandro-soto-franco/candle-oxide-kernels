@@ -7,7 +7,10 @@ use candle_oxide_codegen::testing::assert_ptxas_accepts;
 /// Widening this filter silently turns those assertions module-scoped, the
 /// defect Task 4 fixed by introducing `testing::entry_body`.
 fn badd_only() -> Vec<candle_oxide_codegen::desc::OpDesc> {
-    binary_ops().into_iter().filter(|op| op.name == "badd_f32").collect()
+    binary_ops()
+        .into_iter()
+        .filter(|op| op.name == "badd_f32")
+        .collect()
 }
 
 #[test]

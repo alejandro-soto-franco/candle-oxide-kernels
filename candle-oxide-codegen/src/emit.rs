@@ -4,9 +4,7 @@
 use crate::desc::{DType, OutType};
 use cuda_oxide_codegen::experimental::CodegenModule;
 use dialect_mir::attributes::MirCastKindAttr;
-use dialect_mir::ops::{
-    MirCastOp, MirCondBranchOp, MirConstantOp, MirFloatConstantOp, MirGotoOp,
-};
+use dialect_mir::ops::{MirCastOp, MirCondBranchOp, MirConstantOp, MirFloatConstantOp, MirGotoOp};
 use dialect_mir::types::MirPtrType;
 use pliron::{
     basic_block::BasicBlock,
@@ -19,8 +17,8 @@ use pliron::{
     linked_list::ContainsLinkedList,
     op::Op,
     operation::Operation,
-    region::Region,
     r#type::TypeHandle,
+    region::Region,
     utils::apint::APInt,
     value::Value,
 };
@@ -186,7 +184,14 @@ pub fn new_block(ctx: &mut Context, region: Ptr<Region>, args: Vec<TypeHandle>) 
 /// Terminate `block` with an unconditional branch to `target`, passing `args`
 /// as the target's block arguments.
 pub fn goto(ctx: &mut Context, block: Ptr<BasicBlock>, target: Ptr<BasicBlock>, args: Vec<Value>) {
-    let op = Operation::new(ctx, MirGotoOp::get_concrete_op_info(), vec![], args, vec![target], 0);
+    let op = Operation::new(
+        ctx,
+        MirGotoOp::get_concrete_op_info(),
+        vec![],
+        args,
+        vec![target],
+        0,
+    );
     op.insert_at_back(block, ctx);
 }
 
@@ -201,7 +206,8 @@ pub fn cond_br(
     false_target: Ptr<BasicBlock>,
     false_args: Vec<Value>,
 ) {
-    let (flat, segs) = MirCondBranchOp::compute_segment_sizes(vec![vec![cond], true_args, false_args]);
+    let (flat, segs) =
+        MirCondBranchOp::compute_segment_sizes(vec![vec![cond], true_args, false_args]);
     let op = Operation::new(
         ctx,
         MirCondBranchOp::get_concrete_op_info(),

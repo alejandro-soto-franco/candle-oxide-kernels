@@ -31,7 +31,10 @@ fn each_arithmetic_entry_lowers_to_its_own_instruction() {
         ("bdiv_f64", "div.rn.f64"),
     ] {
         let body = entry_body(&ptx, entry);
-        assert!(body.contains(mnemonic), "{entry} must lower to {mnemonic}:\n{body}");
+        assert!(
+            body.contains(mnemonic),
+            "{entry} must lower to {mnemonic}:\n{body}"
+        );
     }
 }
 
@@ -84,9 +87,17 @@ fn comparisons_store_one_byte() {
     let stems = ["eq", "ne", "lt", "le", "gt", "ge"];
     let ops: Vec<_> = binary_ops()
         .into_iter()
-        .filter(|op| stems.iter().any(|stem| op.name.starts_with(&format!("{stem}_"))))
+        .filter(|op| {
+            stems
+                .iter()
+                .any(|stem| op.name.starts_with(&format!("{stem}_")))
+        })
         .collect();
-    assert_eq!(ops.len(), 12, "expected all six comparison kinds at both dtypes");
+    assert_eq!(
+        ops.len(),
+        12,
+        "expected all six comparison kinds at both dtypes"
+    );
     let ptx = build_family(Family::Binary, &ops, "sm_80").unwrap();
     // Candle's BINARY_OP_OUT writes `uint8_t`, so the store must be one byte
     // wide. nvcc spells that `st.global.u8` and the LLVM NVPTX backend spells

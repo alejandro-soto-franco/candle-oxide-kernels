@@ -20,7 +20,11 @@ pub fn assert_ptxas_accepts(ptx: &[u8], label: &str, arch: &str) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let dir = std::env::temp_dir().join(format!("candle_oxide_{label}_{}_{}", std::process::id(), unique));
+    let dir = std::env::temp_dir().join(format!(
+        "candle_oxide_{label}_{}_{}",
+        std::process::id(),
+        unique
+    ));
     std::fs::create_dir_all(&dir).unwrap();
     let ptx_path = dir.join("kernel.ptx");
     let cubin_path = dir.join("kernel.cubin");
@@ -69,7 +73,11 @@ pub fn find_nvcc() -> PathBuf {
 /// on a builtin pulled in by system headers, so nvcc needs the compatibility
 /// pre-include and `--allow-unsupported-compiler` to accept the host
 /// compiler at all.
-pub fn nvcc_ptx_for(cu_path: &std::path::Path, include_dir: &std::path::Path, arch: &str) -> String {
+pub fn nvcc_ptx_for(
+    cu_path: &std::path::Path,
+    include_dir: &std::path::Path,
+    arch: &str,
+) -> String {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())

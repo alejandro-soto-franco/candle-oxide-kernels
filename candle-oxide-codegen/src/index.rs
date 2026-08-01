@@ -25,18 +25,57 @@ use pliron::{
 };
 
 /// `dims[dim_idx]`, where `dim_idx` is a 64-bit index into a `const size_t *`.
-fn load_usize(ctx: &mut Context, block: Ptr<BasicBlock>, tys: &Tys, base: Value, idx: Value) -> Value {
-    let p = emit(ctx, block, MirPtrOffsetOp::get_concrete_op_info(), vec![tys.usize_ptr], vec![base, idx])
-        .unwrap();
-    emit(ctx, block, MirLoadOp::get_concrete_op_info(), vec![tys.i64], vec![p]).unwrap()
+fn load_usize(
+    ctx: &mut Context,
+    block: Ptr<BasicBlock>,
+    tys: &Tys,
+    base: Value,
+    idx: Value,
+) -> Value {
+    let p = emit(
+        ctx,
+        block,
+        MirPtrOffsetOp::get_concrete_op_info(),
+        vec![tys.usize_ptr],
+        vec![base, idx],
+    )
+    .unwrap();
+    emit(
+        ctx,
+        block,
+        MirLoadOp::get_concrete_op_info(),
+        vec![tys.i64],
+        vec![p],
+    )
+    .unwrap()
 }
 
 /// `dim_idx = num_dims - 1 - d`, computed in 64 bits and then round-tripped
 /// through 32 bits, matching C's `unsigned int dim_idx = num_dims - 1 - d`.
-fn dim_index(ctx: &mut Context, block: Ptr<BasicBlock>, tys: &Tys, num_dims: Value, d: Value) -> Value {
+fn dim_index(
+    ctx: &mut Context,
+    block: Ptr<BasicBlock>,
+    tys: &Tys,
+    num_dims: Value,
+    d: Value,
+) -> Value {
     let one = const_u64(ctx, block, 1);
-    let last = emit(ctx, block, MirSubOp::get_concrete_op_info(), vec![tys.i64], vec![num_dims, one]).unwrap();
-    let wide = emit(ctx, block, MirSubOp::get_concrete_op_info(), vec![tys.i64], vec![last, d]).unwrap();
+    let last = emit(
+        ctx,
+        block,
+        MirSubOp::get_concrete_op_info(),
+        vec![tys.i64],
+        vec![num_dims, one],
+    )
+    .unwrap();
+    let wide = emit(
+        ctx,
+        block,
+        MirSubOp::get_concrete_op_info(),
+        vec![tys.i64],
+        vec![last, d],
+    )
+    .unwrap();
     let narrow = narrow_u64_to_u32(ctx, block, wide);
     widen_u32_to_u64(ctx, block, narrow)
 }
@@ -72,7 +111,14 @@ pub fn emit_is_contiguous(
         let b = header.deref(ctx);
         (b.get_argument(0), b.get_argument(1))
     };
-    let more = emit(ctx, header, MirLtOp::get_concrete_op_info(), vec![tys.i1], vec![d, num_dims]).unwrap();
+    let more = emit(
+        ctx,
+        header,
+        MirLtOp::get_concrete_op_info(),
+        vec![tys.i1],
+        vec![d, num_dims],
+    )
+    .unwrap();
     cond_br(ctx, header, more, step, vec![], yes, vec![]);
 
     // step: load dims[dim_idx] and strides[dim_idx], then test `dim > 1`.
@@ -80,18 +126,46 @@ pub fn emit_is_contiguous(
     let dim = load_usize(ctx, step, tys, dims, dim_idx);
     let strd = load_usize(ctx, step, tys, strides, dim_idx);
     let one = const_u64(ctx, step, 1);
-    let gt1 = emit(ctx, step, MirGtOp::get_concrete_op_info(), vec![tys.i1], vec![dim, one]).unwrap();
+    let gt1 = emit(
+        ctx,
+        step,
+        MirGtOp::get_concrete_op_info(),
+        vec![tys.i1],
+        vec![dim, one],
+    )
+    .unwrap();
     cond_br(ctx, step, gt1, check_acc, vec![], advance, vec![]);
 
     // check_acc: `acc != strides[dim_idx]` fails the test. The `&&` in C
     // short-circuits, which the two branches reproduce.
-    let ne = emit(ctx, check_acc, MirNeOp::get_concrete_op_info(), vec![tys.i1], vec![acc, strd]).unwrap();
+    let ne = emit(
+        ctx,
+        check_acc,
+        MirNeOp::get_concrete_op_info(),
+        vec![tys.i1],
+        vec![acc, strd],
+    )
+    .unwrap();
     cond_br(ctx, check_acc, ne, no, vec![], advance, vec![]);
 
     // advance: acc *= dim; d += 1.
-    let acc_next = emit(ctx, advance, MirMulOp::get_concrete_op_info(), vec![tys.i64], vec![acc, dim]).unwrap();
+    let acc_next = emit(
+        ctx,
+        advance,
+        MirMulOp::get_concrete_op_info(),
+        vec![tys.i64],
+        vec![acc, dim],
+    )
+    .unwrap();
     let one = const_u64(ctx, advance, 1);
-    let d_next = emit(ctx, advance, MirAddOp::get_concrete_op_info(), vec![tys.i64], vec![d, one]).unwrap();
+    let d_next = emit(
+        ctx,
+        advance,
+        MirAddOp::get_concrete_op_info(),
+        vec![tys.i64],
+        vec![d, one],
+    )
+    .unwrap();
     goto(ctx, advance, header, vec![acc_next, d_next]);
 
     let t = const_i1(ctx, yes, true);
@@ -135,7 +209,14 @@ pub fn emit_strided_index(
         let b = header.deref(ctx);
         (b.get_argument(0), b.get_argument(1), b.get_argument(2))
     };
-    let more = emit(ctx, header, MirLtOp::get_concrete_op_info(), vec![tys.i1], vec![d, num_dims]).unwrap();
+    let more = emit(
+        ctx,
+        header,
+        MirLtOp::get_concrete_op_info(),
+        vec![tys.i1],
+        vec![d, num_dims],
+    )
+    .unwrap();
     cond_br(ctx, header, more, step, vec![], exit, vec![strided_i]);
 
     let dim_idx = dim_index(ctx, step, tys, num_dims, d);
@@ -145,13 +226,47 @@ pub fn emit_strided_index(
     let dim = narrow_u64_to_u32(ctx, step, dim64);
     let strd = narrow_u64_to_u32(ctx, step, strd64);
 
-    let i_dim = emit(ctx, step, MirRemOp::get_concrete_op_info(), vec![tys.i32], vec![idx, dim]).unwrap();
-    let contrib = emit(ctx, step, MirMulOp::get_concrete_op_info(), vec![tys.i32], vec![i_dim, strd]).unwrap();
-    let strided_next =
-        emit(ctx, step, MirAddOp::get_concrete_op_info(), vec![tys.i32], vec![strided_i, contrib]).unwrap();
-    let idx_next = emit(ctx, step, MirDivOp::get_concrete_op_info(), vec![tys.i32], vec![idx, dim]).unwrap();
+    let i_dim = emit(
+        ctx,
+        step,
+        MirRemOp::get_concrete_op_info(),
+        vec![tys.i32],
+        vec![idx, dim],
+    )
+    .unwrap();
+    let contrib = emit(
+        ctx,
+        step,
+        MirMulOp::get_concrete_op_info(),
+        vec![tys.i32],
+        vec![i_dim, strd],
+    )
+    .unwrap();
+    let strided_next = emit(
+        ctx,
+        step,
+        MirAddOp::get_concrete_op_info(),
+        vec![tys.i32],
+        vec![strided_i, contrib],
+    )
+    .unwrap();
+    let idx_next = emit(
+        ctx,
+        step,
+        MirDivOp::get_concrete_op_info(),
+        vec![tys.i32],
+        vec![idx, dim],
+    )
+    .unwrap();
     let one = const_u64(ctx, step, 1);
-    let d_next = emit(ctx, step, MirAddOp::get_concrete_op_info(), vec![tys.i64], vec![d, one]).unwrap();
+    let d_next = emit(
+        ctx,
+        step,
+        MirAddOp::get_concrete_op_info(),
+        vec![tys.i64],
+        vec![d, one],
+    )
+    .unwrap();
     goto(ctx, step, header, vec![strided_next, idx_next, d_next]);
 
     let result = exit.deref(ctx).get_argument(0);

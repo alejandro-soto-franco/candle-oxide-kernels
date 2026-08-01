@@ -72,7 +72,14 @@ pub fn build_binary(module: &mut CodegenModule, op: &OpDesc) {
         ];
         let func_type = FunctionType::get(ctx, params.clone(), vec![]);
         let func = {
-            let fop = Operation::new(ctx, MirFuncOp::get_concrete_op_info(), vec![], vec![], vec![], 1);
+            let fop = Operation::new(
+                ctx,
+                MirFuncOp::get_concrete_op_info(),
+                vec![],
+                vec![],
+                vec![],
+                1,
+            );
             let func = MirFuncOp::new(ctx, fop, TypeAttr::new(func_type.into()));
             func.set_symbol_name(ctx, name.as_str().try_into().unwrap());
             func
@@ -94,48 +101,173 @@ pub fn build_binary(module: &mut CodegenModule, op: &OpDesc) {
             )
         };
 
-        let tid = emit(ctx, entry, ReadPtxSregTidXOp::get_concrete_op_info(), vec![tys.i32], vec![]).unwrap();
-        let ctaid = emit(ctx, entry, ReadPtxSregCtaidXOp::get_concrete_op_info(), vec![tys.i32], vec![]).unwrap();
-        let ntid = emit(ctx, entry, ReadPtxSregNtidXOp::get_concrete_op_info(), vec![tys.i32], vec![]).unwrap();
-        let nctaid = emit(ctx, entry, ReadPtxSregNctaidXOp::get_concrete_op_info(), vec![tys.i32], vec![]).unwrap();
+        let tid = emit(
+            ctx,
+            entry,
+            ReadPtxSregTidXOp::get_concrete_op_info(),
+            vec![tys.i32],
+            vec![],
+        )
+        .unwrap();
+        let ctaid = emit(
+            ctx,
+            entry,
+            ReadPtxSregCtaidXOp::get_concrete_op_info(),
+            vec![tys.i32],
+            vec![],
+        )
+        .unwrap();
+        let ntid = emit(
+            ctx,
+            entry,
+            ReadPtxSregNtidXOp::get_concrete_op_info(),
+            vec![tys.i32],
+            vec![],
+        )
+        .unwrap();
+        let nctaid = emit(
+            ctx,
+            entry,
+            ReadPtxSregNctaidXOp::get_concrete_op_info(),
+            vec![tys.i32],
+            vec![],
+        )
+        .unwrap();
 
-        let base = emit(ctx, entry, MirMulOp::get_concrete_op_info(), vec![tys.i32], vec![ctaid, ntid]).unwrap();
-        let i0 = emit(ctx, entry, MirAddOp::get_concrete_op_info(), vec![tys.i32], vec![base, tid]).unwrap();
-        let step = emit(ctx, entry, MirMulOp::get_concrete_op_info(), vec![tys.i32], vec![ntid, nctaid]).unwrap();
+        let base = emit(
+            ctx,
+            entry,
+            MirMulOp::get_concrete_op_info(),
+            vec![tys.i32],
+            vec![ctaid, ntid],
+        )
+        .unwrap();
+        let i0 = emit(
+            ctx,
+            entry,
+            MirAddOp::get_concrete_op_info(),
+            vec![tys.i32],
+            vec![base, tid],
+        )
+        .unwrap();
+        let step = emit(
+            ctx,
+            entry,
+            MirMulOp::get_concrete_op_info(),
+            vec![tys.i32],
+            vec![ntid, nctaid],
+        )
+        .unwrap();
 
         // `dims_and_strides == nullptr`. pliron offers no int-to-pointer cast
         // kind, so the address is exposed and compared against zero, which
         // lowers to `ptrtoint` and an integer `icmp eq`.
         let ds_addr = expose_address(ctx, entry, &tys, dims);
         let zero = crate::emit::const_u64(ctx, entry, 0);
-        let is_null = emit(ctx, entry, MirEqOp::get_concrete_op_info(), vec![tys.i1], vec![ds_addr, zero]).unwrap();
+        let is_null = emit(
+            ctx,
+            entry,
+            MirEqOp::get_concrete_op_info(),
+            vec![tys.i1],
+            vec![ds_addr, zero],
+        )
+        .unwrap();
 
         // The layout tests live behind the null check, so a null pointer is
         // never dereferenced.
         let check = new_block(ctx, region, vec![]);
         let one = crate::emit::const_u64(ctx, check, 1);
         let two = crate::emit::const_u64(ctx, check, 2);
-        let nd1 = emit(ctx, check, MirMulOp::get_concrete_op_info(), vec![tys.i64], vec![num_dims, one]).unwrap();
-        let nd2 = emit(ctx, check, MirMulOp::get_concrete_op_info(), vec![tys.i64], vec![num_dims, two]).unwrap();
-        let lhs_strides =
-            emit(ctx, check, MirPtrOffsetOp::get_concrete_op_info(), vec![tys.usize_ptr], vec![dims, nd1]).unwrap();
-        let rhs_strides =
-            emit(ctx, check, MirPtrOffsetOp::get_concrete_op_info(), vec![tys.usize_ptr], vec![dims, nd2]).unwrap();
+        let nd1 = emit(
+            ctx,
+            check,
+            MirMulOp::get_concrete_op_info(),
+            vec![tys.i64],
+            vec![num_dims, one],
+        )
+        .unwrap();
+        let nd2 = emit(
+            ctx,
+            check,
+            MirMulOp::get_concrete_op_info(),
+            vec![tys.i64],
+            vec![num_dims, two],
+        )
+        .unwrap();
+        let lhs_strides = emit(
+            ctx,
+            check,
+            MirPtrOffsetOp::get_concrete_op_info(),
+            vec![tys.usize_ptr],
+            vec![dims, nd1],
+        )
+        .unwrap();
+        let rhs_strides = emit(
+            ctx,
+            check,
+            MirPtrOffsetOp::get_concrete_op_info(),
+            vec![tys.usize_ptr],
+            vec![dims, nd2],
+        )
+        .unwrap();
 
         let (lhs_cont, after_lhs) =
             emit_is_contiguous(ctx, region, &tys, num_dims, dims, lhs_strides, check);
         let (rhs_cont, after_rhs) =
             emit_is_contiguous(ctx, region, &tys, num_dims, dims, rhs_strides, after_lhs);
 
-        let env = Env { numel, num_dims, dims, lhs, rhs, out, i0, step, lhs_strides, rhs_strides };
+        let env = Env {
+            numel,
+            num_dims,
+            dims,
+            lhs,
+            rhs,
+            out,
+            i0,
+            step,
+            lhs_strides,
+            rhs_strides,
+        };
 
         // Named for which operand is contiguous, matching the C's `lhs_cont`
         // and `rhs_cont`. The `IndexMode` on the same line is the opposite
         // reading: an operand that is contiguous is indexed contiguously.
-        let both = emit_loop(ctx, region, &tys, op, &env, IndexMode::Contiguous, IndexMode::Contiguous);
-        let lhs_cont_only = emit_loop(ctx, region, &tys, op, &env, IndexMode::Contiguous, IndexMode::Strided);
-        let rhs_cont_only = emit_loop(ctx, region, &tys, op, &env, IndexMode::Strided, IndexMode::Contiguous);
-        let neither = emit_loop(ctx, region, &tys, op, &env, IndexMode::Strided, IndexMode::Strided);
+        let both = emit_loop(
+            ctx,
+            region,
+            &tys,
+            op,
+            &env,
+            IndexMode::Contiguous,
+            IndexMode::Contiguous,
+        );
+        let lhs_cont_only = emit_loop(
+            ctx,
+            region,
+            &tys,
+            op,
+            &env,
+            IndexMode::Contiguous,
+            IndexMode::Strided,
+        );
+        let rhs_cont_only = emit_loop(
+            ctx,
+            region,
+            &tys,
+            op,
+            &env,
+            IndexMode::Strided,
+            IndexMode::Contiguous,
+        );
+        let neither = emit_loop(
+            ctx,
+            region,
+            &tys,
+            op,
+            &env,
+            IndexMode::Strided,
+            IndexMode::Strided,
+        );
 
         // A null `dims_and_strides` takes the both-contiguous loop directly.
         cond_br(ctx, entry, is_null, both, vec![], check, vec![]);
@@ -143,9 +275,33 @@ pub fn build_binary(module: &mut CodegenModule, op: &OpDesc) {
         // The two verdicts select one of the four loops.
         let on_lhs_cont = new_block(ctx, region, vec![]);
         let on_lhs_strided = new_block(ctx, region, vec![]);
-        cond_br(ctx, after_rhs, lhs_cont, on_lhs_cont, vec![], on_lhs_strided, vec![]);
-        cond_br(ctx, on_lhs_cont, rhs_cont, both, vec![], lhs_cont_only, vec![]);
-        cond_br(ctx, on_lhs_strided, rhs_cont, rhs_cont_only, vec![], neither, vec![]);
+        cond_br(
+            ctx,
+            after_rhs,
+            lhs_cont,
+            on_lhs_cont,
+            vec![],
+            on_lhs_strided,
+            vec![],
+        );
+        cond_br(
+            ctx,
+            on_lhs_cont,
+            rhs_cont,
+            both,
+            vec![],
+            lhs_cont_only,
+            vec![],
+        );
+        cond_br(
+            ctx,
+            on_lhs_strided,
+            rhs_cont,
+            rhs_cont_only,
+            vec![],
+            neither,
+            vec![],
+        );
 
         func.get_operation().insert_at_back(module_block, ctx);
     });
@@ -176,7 +332,14 @@ fn emit_loop(
     // so widen first, matching C's integer promotion.
     let i_hdr = header.deref(ctx).get_argument(0);
     let i_wide = widen_u32_to_u64(ctx, header, i_hdr);
-    let more = emit(ctx, header, MirLtOp::get_concrete_op_info(), vec![tys.i1], vec![i_wide, env.numel]).unwrap();
+    let more = emit(
+        ctx,
+        header,
+        MirLtOp::get_concrete_op_info(),
+        vec![tys.i1],
+        vec![i_wide, env.numel],
+    )
+    .unwrap();
     cond_br(ctx, header, more, body, vec![i_hdr], exit, vec![]);
 
     // body(i): compute each operand's 32-bit index, then load, apply and store.
@@ -189,19 +352,72 @@ fn emit_loop(
     let rhs_off = widen_u32_to_u64(ctx, blk, rhs_i);
     let out_off = widen_u32_to_u64(ctx, blk, i);
 
-    let lp = emit(ctx, blk, MirPtrOffsetOp::get_concrete_op_info(), vec![tys.in_ptr], vec![env.lhs, lhs_off]).unwrap();
-    let x = emit(ctx, blk, MirLoadOp::get_concrete_op_info(), vec![tys.f], vec![lp]).unwrap();
-    let rp = emit(ctx, blk, MirPtrOffsetOp::get_concrete_op_info(), vec![tys.in_ptr], vec![env.rhs, rhs_off]).unwrap();
-    let y = emit(ctx, blk, MirLoadOp::get_concrete_op_info(), vec![tys.f], vec![rp]).unwrap();
+    let lp = emit(
+        ctx,
+        blk,
+        MirPtrOffsetOp::get_concrete_op_info(),
+        vec![tys.in_ptr],
+        vec![env.lhs, lhs_off],
+    )
+    .unwrap();
+    let x = emit(
+        ctx,
+        blk,
+        MirLoadOp::get_concrete_op_info(),
+        vec![tys.f],
+        vec![lp],
+    )
+    .unwrap();
+    let rp = emit(
+        ctx,
+        blk,
+        MirPtrOffsetOp::get_concrete_op_info(),
+        vec![tys.in_ptr],
+        vec![env.rhs, rhs_off],
+    )
+    .unwrap();
+    let y = emit(
+        ctx,
+        blk,
+        MirLoadOp::get_concrete_op_info(),
+        vec![tys.f],
+        vec![rp],
+    )
+    .unwrap();
     let value = emit_body(ctx, blk, tys, op, &[x, y]);
-    let op_ptr =
-        emit(ctx, blk, MirPtrOffsetOp::get_concrete_op_info(), vec![tys.out_ptr], vec![env.out, out_off]).unwrap();
-    emit(ctx, blk, MirStoreOp::get_concrete_op_info(), vec![], vec![op_ptr, value]);
+    let op_ptr = emit(
+        ctx,
+        blk,
+        MirPtrOffsetOp::get_concrete_op_info(),
+        vec![tys.out_ptr],
+        vec![env.out, out_off],
+    )
+    .unwrap();
+    emit(
+        ctx,
+        blk,
+        MirStoreOp::get_concrete_op_info(),
+        vec![],
+        vec![op_ptr, value],
+    );
 
-    let i_next = emit(ctx, blk, MirAddOp::get_concrete_op_info(), vec![tys.i32], vec![i, env.step]).unwrap();
+    let i_next = emit(
+        ctx,
+        blk,
+        MirAddOp::get_concrete_op_info(),
+        vec![tys.i32],
+        vec![i, env.step],
+    )
+    .unwrap();
     goto(ctx, blk, header, vec![i_next]);
 
-    emit(ctx, exit, MirReturnOp::get_concrete_op_info(), vec![], vec![]);
+    emit(
+        ctx,
+        exit,
+        MirReturnOp::get_concrete_op_info(),
+        vec![],
+        vec![],
+    );
     preheader
 }
 
@@ -232,7 +448,14 @@ fn operand_index(
 /// `(size_t)ptr`, the only pointer-to-integer conversion pliron's MIR dialect
 /// carries.
 fn expose_address(ctx: &mut Context, block: Ptr<BasicBlock>, tys: &Tys, ptr: Value) -> Value {
-    let cast = Operation::new(ctx, MirCastOp::get_concrete_op_info(), vec![tys.i64], vec![ptr], vec![], 0);
+    let cast = Operation::new(
+        ctx,
+        MirCastOp::get_concrete_op_info(),
+        vec![tys.i64],
+        vec![ptr],
+        vec![],
+        0,
+    );
     MirCastOp::new(cast).set_attr_cast_kind(ctx, MirCastKindAttr::PointerExposeAddress);
     let res = cast.deref(ctx).get_result(0);
     cast.insert_at_back(block, ctx);

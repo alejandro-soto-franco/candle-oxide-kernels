@@ -9,10 +9,16 @@ fn the_artifacts_are_present_and_non_empty() {
 #[test]
 fn every_declared_entry_is_in_its_artifact() {
     for name in k::BINARY_ENTRIES {
-        assert!(k::BINARY.contains(&format!(".entry {name}(")), "{name} missing from binary.ptx");
+        assert!(
+            k::BINARY.contains(&format!(".entry {name}(")),
+            "{name} missing from binary.ptx"
+        );
     }
     for name in k::UNARY_ENTRIES {
-        assert!(k::UNARY.contains(&format!(".entry {name}(")), "{name} missing from unary.ptx");
+        assert!(
+            k::UNARY.contains(&format!(".entry {name}(")),
+            "{name} missing from unary.ptx"
+        );
     }
 }
 
@@ -41,5 +47,8 @@ fn the_module_names_are_namespaced() {
     assert_eq!(k::UNARY_MODULE, "oxide::unary");
     assert!(k::has_entry(k::BINARY_MODULE, "badd_f32"));
     assert!(k::has_entry(k::UNARY_MODULE, "usqrt_f64"));
-    assert!(!k::has_entry(k::UNARY_MODULE, "badd_f32"), "families do not overlap");
+    assert!(
+        !k::has_entry(k::UNARY_MODULE, "badd_f32"),
+        "families do not overlap"
+    );
 }
