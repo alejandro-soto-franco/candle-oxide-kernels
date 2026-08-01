@@ -1,0 +1,215 @@
+// ulog_f64, sliced from the #[kernel] oracle module. See README.md
+// for the command, toolchain and cuda-oxide revision behind it.
+.version 7.0
+.target sm_80
+.address_size 64
+
+.visible .entry ulog_f64(
+	.param .u64 ulog_f64_param_0,
+	.param .u64 ulog_f64_param_1,
+	.param .u64 .ptr .align 1 ulog_f64_param_2,
+	.param .u64 .ptr .align 1 ulog_f64_param_3,
+	.param .u64 .ptr .align 1 ulog_f64_param_4
+)                                       // @ulog_f64
+{
+	.reg .pred 	%p<18>;
+	.reg .b32 	%r<29>;
+	.reg .b64 	%rd<84>;
+
+// %bb.0:                               // %entry
+	ld.param.b64 	%rd9, [ulog_f64_param_0];
+	ld.param.b64 	%rd10, [ulog_f64_param_1];
+	ld.param.b64 	%rd11, [ulog_f64_param_2];
+	cvta.to.global.u64 	%rd1, %rd11;
+	ld.param.b64 	%rd12, [ulog_f64_param_3];
+	cvta.to.global.u64 	%rd2, %rd12;
+	ld.param.b64 	%rd13, [ulog_f64_param_4];
+	cvta.to.global.u64 	%rd3, %rd13;
+	mov.b64 	%rd14, 0;
+	cvta.to.global.u64 	%rd15, %rd14;
+	setp.eq.b64 	%p3, %rd1, %rd15;
+	setp.eq.b64 	%p4, %rd10, 0;
+	or.pred 	%p5, %p3, %p4;
+	mov.pred 	%p2, -1;
+	mov.pred 	%p17, %p2;
+	@%p5 bra 	$L__BB23_4;
+// %bb.1:                               // %bb2.i.preheader
+	shl.b64 	%rd16, %rd10, 3;
+	add.s64 	%rd17, %rd16, %rd1;
+	add.s64 	%rd71, %rd17, -8;
+	shl.b64 	%rd18, %rd10, 4;
+	add.s64 	%rd19, %rd18, %rd1;
+	add.s64 	%rd70, %rd19, -8;
+	mov.b64 	%rd73, 1;
+	mov.b64 	%rd72, %rd10;
+$L__BB23_2:                             // %bb2.i
+                                        // =>This Inner Loop Header: Depth=1
+	ld.global.b64 	%rd20, [%rd70];
+	setp.eq.b64 	%p17, %rd73, %rd20;
+	setp.ne.b64 	%p6, %rd73, %rd20;
+	@%p6 bra 	$L__BB23_4;
+// %bb.3:                               // %bb4.i
+                                        //   in Loop: Header=BB23_2 Depth=1
+	ld.global.b64 	%rd21, [%rd71];
+	mul.lo.s64 	%rd73, %rd21, %rd73;
+	add.s64 	%rd72, %rd72, -1;
+	add.s64 	%rd71, %rd71, -8;
+	add.s64 	%rd70, %rd70, -8;
+	setp.ne.b64 	%p7, %rd72, 0;
+	mov.pred 	%p17, %p2;
+	@%p7 bra 	$L__BB23_2;
+$L__BB23_4:                             // %bb3
+	mov.u32 	%r1, %ntid.x;
+	mov.u32 	%r4, %ctaid.x;
+	mov.u32 	%r5, %tid.x;
+	mad.lo.s32 	%r6, %r4, %r1, %r5;
+	cvt.u64.u32 	%rd74, %r6;
+	setp.le.u64 	%p8, %rd9, %rd74;
+	@%p8 bra 	$L__BB23_18;
+// %bb.5:                               // %bb10.lr.ph
+	mov.u32 	%r2, %nctaid.x;
+	mul.lo.s32 	%r3, %r1, %r2;
+	cvt.u64.u32 	%rd4, %r3;
+	mov.b32 	%r7, 1127219200;
+	mov.b32 	%r8, -2147483648;
+	mov.b64 	%rd5, {%r8, %r7};
+	or.pred 	%p1, %p17, %p4;
+	shl.b64 	%rd22, %rd10, 4;
+	add.s64 	%rd23, %rd22, %rd1;
+	add.s64 	%rd6, %rd23, -8;
+	shl.b64 	%rd24, %rd10, 3;
+	add.s64 	%rd25, %rd24, %rd1;
+	add.s64 	%rd7, %rd25, -8;
+	bra.uni 	$L__BB23_6;
+$L__BB23_16:                            //   in Loop: Header=BB23_6 Depth=1
+	fma.rn.f64 	%rd33, %rd82, 0d7FF0000000000000, 0d7FF0000000000000;
+	{ .reg .b32 tmp; mov.b64 {tmp, %r13}, %rd82; }
+	and.b32 	%r14, %r13, 2147483647;
+	setp.eq.b32 	%p14, %r14, 0;
+	selp.f64 	%rd83, 0dFFF0000000000000, %rd33, %p14;
+$L__BB23_17:                            // %__nv_log.exit
+                                        //   in Loop: Header=BB23_6 Depth=1
+	shl.b64 	%rd68, %rd74, 3;
+	add.s64 	%rd69, %rd3, %rd68;
+	st.global.b64 	[%rd69], %rd83;
+	add.s64 	%rd74, %rd74, %rd4;
+	setp.lt.u64 	%p16, %rd74, %rd9;
+	@%p16 bra 	$L__BB23_6;
+	bra.uni 	$L__BB23_18;
+$L__BB23_6:                             // %bb10
+                                        // =>This Loop Header: Depth=1
+                                        //     Child Loop BB23_7 Depth 2
+	selp.b64 	%rd81, %rd74, 0, %p17;
+	mov.b64 	%rd79, 0;
+	mov.b64 	%rd75, %rd7;
+	mov.b64 	%rd76, %rd6;
+	mov.b64 	%rd77, %rd10;
+	mov.b64 	%rd78, %rd74;
+	@%p1 bra 	$L__BB23_12;
+	bra.uni 	$L__BB23_7;
+$L__BB23_12:                            // %bb13
+                                        //   in Loop: Header=BB23_6 Depth=1
+	shl.b64 	%rd31, %rd81, 3;
+	add.s64 	%rd32, %rd2, %rd31;
+	ld.global.b64 	%rd82, [%rd32];
+	{ .reg .b32 tmp; mov.b64 {tmp, %r26}, %rd82; }
+	{ .reg .b32 tmp; mov.b64 {%r27, tmp}, %rd82; }
+	setp.gt.s32 	%p12, %r26, 1048575;
+	mov.b32 	%r28, -1023;
+	@%p12 bra 	$L__BB23_14;
+// %bb.13:                              //   in Loop: Header=BB23_6 Depth=1
+	mul.f64 	%rd82, %rd82, 0d4350000000000000;
+	{ .reg .b32 tmp; mov.b64 {%r27, tmp}, %rd82; }
+	{ .reg .b32 tmp; mov.b64 {tmp, %r26}, %rd82; }
+	mov.b32 	%r28, -1077;
+$L__BB23_14:                            //   in Loop: Header=BB23_6 Depth=1
+	add.s32 	%r12, %r26, -1;
+	setp.gt.u32 	%p13, %r12, 2146435070;
+	@%p13 bra 	$L__BB23_16;
+// %bb.15:                              //   in Loop: Header=BB23_6 Depth=1
+	shr.u32 	%r15, %r26, 20;
+	add.s32 	%r16, %r28, %r15;
+	and.b32 	%r17, %r26, 1048575;
+	or.b32 	%r18, %r17, 1072693248;
+	mov.b64 	%rd34, {%r27, %r18};
+	setp.gt.u32 	%p15, %r18, 1073127582;
+	{ .reg .b32 tmp; mov.b64 {%r19, tmp}, %rd34; }
+	{ .reg .b32 tmp; mov.b64 {tmp, %r20}, %rd34; }
+	add.s32 	%r21, %r20, -1048576;
+	mov.b64 	%rd35, {%r19, %r21};
+	selp.f64 	%rd36, %rd35, %rd34, %p15;
+	selp.b32 	%r22, 1, 0, %p15;
+	add.s32 	%r23, %r16, %r22;
+	add.f64 	%rd37, %rd36, 0dBFF0000000000000;
+	add.f64 	%rd38, %rd36, 0d3FF0000000000000;
+	rcp.approx.ftz.f64 	%rd39, %rd38;
+	neg.f64 	%rd40, %rd38;
+	fma.rn.f64 	%rd41, %rd40, %rd39, 0d3FF0000000000000;
+	fma.rn.f64 	%rd42, %rd41, %rd41, %rd41;
+	fma.rn.f64 	%rd43, %rd42, %rd39, %rd39;
+	mul.f64 	%rd44, %rd37, %rd43;
+	fma.rn.f64 	%rd45, %rd37, %rd43, %rd44;
+	mul.f64 	%rd46, %rd45, %rd45;
+	fma.rn.f64 	%rd47, %rd46, 0d3EB1380B3AE80F1E, 0d3ED0EE258B7A8B04;
+	fma.rn.f64 	%rd48, %rd47, %rd46, 0d3EF3B2669F02676F;
+	fma.rn.f64 	%rd49, %rd48, %rd46, 0d3F1745CBA9AB0956;
+	fma.rn.f64 	%rd50, %rd49, %rd46, 0d3F3C71C72D1B5154;
+	fma.rn.f64 	%rd51, %rd50, %rd46, 0d3F624924923BE72D;
+	fma.rn.f64 	%rd52, %rd51, %rd46, 0d3F8999999999A3C4;
+	fma.rn.f64 	%rd53, %rd52, %rd46, 0d3FB5555555555554;
+	sub.f64 	%rd54, %rd37, %rd45;
+	add.f64 	%rd55, %rd54, %rd54;
+	neg.f64 	%rd56, %rd45;
+	fma.rn.f64 	%rd57, %rd56, %rd37, %rd55;
+	mul.f64 	%rd58, %rd43, %rd57;
+	mul.f64 	%rd59, %rd46, %rd53;
+	fma.rn.f64 	%rd60, %rd59, %rd45, %rd58;
+	xor.b32 	%r24, %r23, -2147483648;
+	mov.b32 	%r25, 1127219200;
+	mov.b64 	%rd61, {%r24, %r25};
+	sub.f64 	%rd62, %rd61, %rd5;
+	fma.rn.f64 	%rd63, %rd62, 0d3FE62E42FEFA39EF, %rd45;
+	fma.rn.f64 	%rd64, %rd62, 0dBFE62E42FEFA39EF, %rd63;
+	sub.f64 	%rd65, %rd64, %rd45;
+	sub.f64 	%rd66, %rd60, %rd65;
+	fma.rn.f64 	%rd67, %rd62, 0d3C7ABC9E3B39803F, %rd66;
+	add.f64 	%rd83, %rd63, %rd67;
+	bra.uni 	$L__BB23_17;
+$L__BB23_10:                            //   in Loop: Header=BB23_7 Depth=2
+	div.u64 	%rd80, %rd78, %rd8;
+$L__BB23_11:                            //   in Loop: Header=BB23_7 Depth=2
+	mul.lo.s64 	%rd28, %rd80, %rd8;
+	sub.s64 	%rd29, %rd78, %rd28;
+	ld.global.b64 	%rd30, [%rd76];
+	mad.lo.s64 	%rd79, %rd30, %rd29, %rd79;
+	add.s64 	%rd77, %rd77, -1;
+	add.s64 	%rd76, %rd76, -8;
+	add.s64 	%rd75, %rd75, -8;
+	setp.eq.b64 	%p11, %rd77, 0;
+	mov.b64 	%rd78, %rd80;
+	mov.b64 	%rd81, %rd79;
+	@%p11 bra 	$L__BB23_12;
+$L__BB23_7:                             // %bb2.i1
+                                        //   Parent Loop BB23_6 Depth=1
+                                        // =>  This Inner Loop Header: Depth=2
+	ld.global.b64 	%rd8, [%rd75];
+	setp.eq.b64 	%p9, %rd8, 0;
+	@%p9 bra 	$L__BB23_19;
+// %bb.8:                               // %bb4.i3
+                                        //   in Loop: Header=BB23_7 Depth=2
+	or.b64 	%rd26, %rd78, %rd8;
+	and.b64 	%rd27, %rd26, -4294967296;
+	setp.ne.b64 	%p10, %rd27, 0;
+	@%p10 bra 	$L__BB23_10;
+// %bb.9:                               //   in Loop: Header=BB23_7 Depth=2
+	cvt.u32.u64 	%r9, %rd8;
+	cvt.u32.u64 	%r10, %rd78;
+	div.u32 	%r11, %r10, %r9;
+	cvt.u64.u32 	%rd80, %r11;
+	bra.uni 	$L__BB23_11;
+$L__BB23_18:                            // %bb14
+	ret;
+$L__BB23_19:                            // %bb6.i
+	trap; exit;
+                                        // -- End function
+}

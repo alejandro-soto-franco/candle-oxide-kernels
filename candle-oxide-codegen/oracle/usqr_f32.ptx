@@ -1,0 +1,142 @@
+// usqr_f32, sliced from the #[kernel] oracle module. See README.md
+// for the command, toolchain and cuda-oxide revision behind it.
+.version 7.0
+.target sm_80
+.address_size 64
+
+.visible .entry usqr_f32(
+	.param .u64 usqr_f32_param_0,
+	.param .u64 usqr_f32_param_1,
+	.param .u64 .ptr .align 1 usqr_f32_param_2,
+	.param .u64 .ptr .align 1 usqr_f32_param_3,
+	.param .u64 .ptr .align 1 usqr_f32_param_4
+)                                       // @usqr_f32
+{
+	.reg .pred 	%p<14>;
+	.reg .b32 	%r<12>;
+	.reg .b64 	%rd<46>;
+
+// %bb.0:                               // %entry
+	ld.param.b64 	%rd8, [usqr_f32_param_0];
+	ld.param.b64 	%rd9, [usqr_f32_param_1];
+	ld.param.b64 	%rd10, [usqr_f32_param_2];
+	cvta.to.global.u64 	%rd1, %rd10;
+	ld.param.b64 	%rd11, [usqr_f32_param_3];
+	cvta.to.global.u64 	%rd2, %rd11;
+	ld.param.b64 	%rd12, [usqr_f32_param_4];
+	cvta.to.global.u64 	%rd3, %rd12;
+	mov.b64 	%rd13, 0;
+	cvta.to.global.u64 	%rd14, %rd13;
+	setp.eq.b64 	%p3, %rd1, %rd14;
+	setp.eq.b64 	%p4, %rd9, 0;
+	or.pred 	%p5, %p3, %p4;
+	mov.pred 	%p2, -1;
+	mov.pred 	%p13, %p2;
+	@%p5 bra 	$L__BB28_4;
+// %bb.1:                               // %bb2.i.preheader
+	shl.b64 	%rd15, %rd9, 3;
+	add.s64 	%rd16, %rd15, %rd1;
+	add.s64 	%rd35, %rd16, -8;
+	shl.b64 	%rd17, %rd9, 4;
+	add.s64 	%rd18, %rd17, %rd1;
+	add.s64 	%rd34, %rd18, -8;
+	mov.b64 	%rd37, 1;
+	mov.b64 	%rd36, %rd9;
+$L__BB28_2:                             // %bb2.i
+                                        // =>This Inner Loop Header: Depth=1
+	ld.global.b64 	%rd19, [%rd34];
+	setp.eq.b64 	%p13, %rd37, %rd19;
+	setp.ne.b64 	%p6, %rd37, %rd19;
+	@%p6 bra 	$L__BB28_4;
+// %bb.3:                               // %bb4.i
+                                        //   in Loop: Header=BB28_2 Depth=1
+	ld.global.b64 	%rd20, [%rd35];
+	mul.lo.s64 	%rd37, %rd20, %rd37;
+	add.s64 	%rd36, %rd36, -1;
+	add.s64 	%rd35, %rd35, -8;
+	add.s64 	%rd34, %rd34, -8;
+	setp.ne.b64 	%p7, %rd36, 0;
+	mov.pred 	%p13, %p2;
+	@%p7 bra 	$L__BB28_2;
+$L__BB28_4:                             // %bb3
+	mov.u32 	%r1, %ntid.x;
+	mov.u32 	%r4, %ctaid.x;
+	mov.u32 	%r5, %tid.x;
+	mad.lo.s32 	%r6, %r4, %r1, %r5;
+	cvt.u64.u32 	%rd38, %r6;
+	setp.le.u64 	%p8, %rd8, %rd38;
+	@%p8 bra 	$L__BB28_13;
+// %bb.5:                               // %bb10.lr.ph
+	mov.u32 	%r2, %nctaid.x;
+	mul.lo.s32 	%r3, %r1, %r2;
+	cvt.u64.u32 	%rd4, %r3;
+	or.pred 	%p1, %p13, %p4;
+	shl.b64 	%rd21, %rd9, 4;
+	add.s64 	%rd22, %rd21, %rd1;
+	add.s64 	%rd5, %rd22, -8;
+	shl.b64 	%rd23, %rd9, 3;
+	add.s64 	%rd24, %rd23, %rd1;
+	add.s64 	%rd6, %rd24, -8;
+	bra.uni 	$L__BB28_6;
+$L__BB28_12:                            // %bb13
+                                        //   in Loop: Header=BB28_6 Depth=1
+	shl.b64 	%rd30, %rd45, 2;
+	add.s64 	%rd31, %rd2, %rd30;
+	ld.global.b32 	%r10, [%rd31];
+	shl.b64 	%rd32, %rd38, 2;
+	add.s64 	%rd33, %rd3, %rd32;
+	mul.f32 	%r11, %r10, %r10;
+	st.global.b32 	[%rd33], %r11;
+	add.s64 	%rd38, %rd38, %rd4;
+	setp.lt.u64 	%p12, %rd38, %rd8;
+	@%p12 bra 	$L__BB28_6;
+	bra.uni 	$L__BB28_13;
+$L__BB28_6:                             // %bb10
+                                        // =>This Loop Header: Depth=1
+                                        //     Child Loop BB28_7 Depth 2
+	selp.b64 	%rd45, %rd38, 0, %p13;
+	mov.b64 	%rd43, 0;
+	mov.b64 	%rd39, %rd6;
+	mov.b64 	%rd40, %rd5;
+	mov.b64 	%rd41, %rd9;
+	mov.b64 	%rd42, %rd38;
+	@%p1 bra 	$L__BB28_12;
+	bra.uni 	$L__BB28_7;
+$L__BB28_10:                            //   in Loop: Header=BB28_7 Depth=2
+	div.u64 	%rd44, %rd42, %rd7;
+$L__BB28_11:                            //   in Loop: Header=BB28_7 Depth=2
+	mul.lo.s64 	%rd27, %rd44, %rd7;
+	sub.s64 	%rd28, %rd42, %rd27;
+	ld.global.b64 	%rd29, [%rd40];
+	mad.lo.s64 	%rd43, %rd29, %rd28, %rd43;
+	add.s64 	%rd41, %rd41, -1;
+	add.s64 	%rd40, %rd40, -8;
+	add.s64 	%rd39, %rd39, -8;
+	setp.eq.b64 	%p11, %rd41, 0;
+	mov.b64 	%rd42, %rd44;
+	mov.b64 	%rd45, %rd43;
+	@%p11 bra 	$L__BB28_12;
+$L__BB28_7:                             // %bb2.i1
+                                        //   Parent Loop BB28_6 Depth=1
+                                        // =>  This Inner Loop Header: Depth=2
+	ld.global.b64 	%rd7, [%rd39];
+	setp.eq.b64 	%p9, %rd7, 0;
+	@%p9 bra 	$L__BB28_14;
+// %bb.8:                               // %bb4.i3
+                                        //   in Loop: Header=BB28_7 Depth=2
+	or.b64 	%rd25, %rd42, %rd7;
+	and.b64 	%rd26, %rd25, -4294967296;
+	setp.ne.b64 	%p10, %rd26, 0;
+	@%p10 bra 	$L__BB28_10;
+// %bb.9:                               //   in Loop: Header=BB28_7 Depth=2
+	cvt.u32.u64 	%r7, %rd7;
+	cvt.u32.u64 	%r8, %rd42;
+	div.u32 	%r9, %r8, %r7;
+	cvt.u64.u32 	%rd44, %r9;
+	bra.uni 	$L__BB28_11;
+$L__BB28_13:                            // %bb14
+	ret;
+$L__BB28_14:                            // %bb6.i
+	trap; exit;
+                                        // -- End function
+}
