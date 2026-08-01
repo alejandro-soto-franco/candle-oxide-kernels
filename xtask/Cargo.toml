@@ -1,0 +1,9 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+
+[dependencies]
+candle-oxide-codegen = { path = "../candle-oxide-codegen" }
+cuda-oxide-codegen = { git = "https://github.com/NVlabs/cuda-oxide", rev = "0810ba95ff9dcf1ca379b779d3ebe33a8899b15d" }

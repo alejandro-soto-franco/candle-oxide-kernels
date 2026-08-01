@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["candle-oxide-codegen"]
+members = ["candle-oxide-codegen", "xtask"]
 
 [workspace.package]
 edition = "2021"
