@@ -6,6 +6,7 @@ pub mod binary;
 pub mod body;
 pub mod desc;
 pub mod emit;
+pub mod testing;
 
 use cuda_oxide_codegen::experimental::{
     CodegenModule, CompileError, CompileOptions, Compiler, Linking, Target,
