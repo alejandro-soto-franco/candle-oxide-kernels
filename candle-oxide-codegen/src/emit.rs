@@ -97,6 +97,11 @@ fn const_int(ctx: &mut Context, block: Ptr<BasicBlock>, value: u64, width: u32) 
     res
 }
 
+/// A 1-bit constant, the `true` and `false` that `is_contiguous` returns.
+pub fn const_i1(ctx: &mut Context, block: Ptr<BasicBlock>, value: bool) -> Value {
+    const_int(ctx, block, value as u64, 1)
+}
+
 pub fn const_u32(ctx: &mut Context, block: Ptr<BasicBlock>, value: u32) -> Value {
     const_int(ctx, block, value as u64, 32)
 }
