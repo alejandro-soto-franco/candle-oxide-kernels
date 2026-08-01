@@ -45,33 +45,19 @@ jobs:
 
       # Linting the whole workspace builds candle-oxide-codegen and xtask,
       # which pull in cuda-oxide-codegen, dialect-mir, dialect-nvvm and
-      # pliron. Install the same CUDA toolkit and LLVM 21 the codegen job
-      # uses so a lint-only run resolves the same dependency graph.
-      - name: Install CUDA toolkit
-        uses: Jimver/cuda-toolkit@v0.2.35
-        id: cuda-toolkit
-        with:
-          cuda: "13.1.1"
-          method: network
-          sub-packages: '["nvcc", "cudart-dev"]'
-
-      - name: Install LLVM 21 (llc/opt for the NVPTX backend)
-        run: |
-          set -euo pipefail
-          source /etc/os-release
-          sudo install -d -m 0755 /etc/apt/keyrings
-          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
-            | sudo tee /etc/apt/keyrings/apt-llvm-org.asc >/dev/null
-          echo "deb [signed-by=/etc/apt/keyrings/apt-llvm-org.asc] https://apt.llvm.org/${VERSION_CODENAME}/ llvm-toolchain-${VERSION_CODENAME}-21 main" \
-            | sudo tee /etc/apt/sources.list.d/llvm-21.list
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends llvm-21
-          llc-21 --version | head -2
-          opt-21 --version | head -2
-
+      # pliron, but building and lint-checking those crates needs neither
+      # the CUDA toolkit nor LLVM. Cargo.lock carries no cuda-bindings and
+      # no rustc-codegen-cuda, the only crates in the cuda-oxide checkout
+      # with a build.rs; libnvvm-sys loads its native library dynamically
+      # through libloading at runtime rather than linking at build time;
+      # and cuda-oxide's own workspace manifest sets
+      # `pliron-llvm = { default-features = false }` to keep llvm-sys and
+      # LLVM out of the build. `Compiler::discover`, `find_ptxas` and
+      # `find_nvcc` run only when a test body executes, and
+      # `cargo clippy --all-targets` type-checks and lints test bodies
+      # without running them. The codegen job below installs both, because
+      # it does run the tests.
       - name: Run clippy
-        env:
-          CUDA_TOOLKIT_PATH: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}
         run: cargo clippy --workspace --all-targets -- -D warnings
 
   kernels:
@@ -99,7 +85,7 @@ jobs:
             exit 1
           fi
 
-      - name: Confirm this job runs on stable, not the workspace's pinned nightly
+      - name: Confirm this step's toolchain overrides the workspace's pinned nightly
         run: cargo +stable --version
 
       - name: Run candle-oxide-kernels tests
@@ -118,14 +104,14 @@ jobs:
       # NVlabs/cuda-oxide rev 0810ba95ff9dcf1ca379b779d3ebe33a8899b15d (see
       # candle-oxide-codegen/Cargo.toml). NVIDIA has stated it is folding
       # cuda-oxide into a cuda-rust mono-repo alongside cutile-rs, so crate
-      # paths may move and this repository may end up archived. That does
-      # not affect candle-oxide-kernels, which depends on neither crate and
-      # ships committed PTX; it affects only this job and a maintainer
-      # regenerating the artefacts. If this job starts failing with a git
-      # fetch error against NVlabs/cuda-oxide, that relocation is the first
-      # thing to check, not a transient network fault. The durable copy of
-      # the pinned rev lives in the maintainer's local $CUDA_OXIDE
-      # worktree; there is no fallback fetch mechanism here.
+      # paths may move and this repository may end up archived. This
+      # affects only this job and a maintainer regenerating the artefacts;
+      # candle-oxide-kernels depends on neither crate and ships committed
+      # PTX. If this job starts failing with a git fetch error against
+      # NVlabs/cuda-oxide, treat that relocation as the first suspect. A
+      # local checkout of the pinned rev, kept outside this repository, is
+      # what a maintainer regenerates the artefacts from; there is no
+      # fallback fetch mechanism here.
       - name: Install CUDA toolkit
         uses: Jimver/cuda-toolkit@v0.2.35
         id: cuda-toolkit
@@ -151,7 +137,7 @@ jobs:
       # Covers tier 1 (builder), tier 2 (ABI) and tier 5 (reproducibility,
       # xtask/tests/reproducible.rs). Tier 4, GPU parity, needs a live GPU
       # that no CI runner here has. It lives in the consuming `candle`
-      # checkout, not in this repository, and runs as
+      # checkout and runs as
       # `cargo test -p candle-core --features cuda,oxide-kernels --test
       # oxide_parity` on a machine with a CUDA device. Run it locally
       # before relying on a change that touches kernel bodies.
