@@ -10,7 +10,7 @@ fn candle_kernels_src() -> std::path::PathBuf {
 }
 
 #[test]
-fn every_entry_matches_nvcc_word_for_word() {
+fn every_entry_matches_nvcc_parameter_shape() {
     let src = candle_kernels_src();
     let reference = [
         (Family::Binary, src.join("binary.cu")),
@@ -35,17 +35,70 @@ fn every_entry_matches_nvcc_word_for_word() {
                 got.len()
             );
             for (index, (g, w)) in got.iter().zip(want.iter()).enumerate() {
-                // The single accepted divergence is `.ptr .global`, an
-                // address-space assertion from MirPtrType::get_global against
-                // nvcc's bare `.ptr`. Every pointer cudarc passes is a global
-                // allocation, so it holds.
-                let normalised = g.replace(".ptr .global", ".ptr");
-                assert_eq!(
-                    normalised.split_whitespace().take(2).collect::<Vec<_>>(),
-                    w.split_whitespace().take(2).collect::<Vec<_>>(),
-                    "{} word {index}: builder {g:?} against nvcc {w:?}",
-                    op.name
-                );
+                // Drop the trailing identifier from each side; only the
+                // declaration's shape (type, address space, alignment) is
+                // an ABI concern, never the parameter's name.
+                let got_shape: Vec<&str> = g.split_whitespace().collect();
+                let want_shape: Vec<&str> = w.split_whitespace().collect();
+                let got_shape = &got_shape[..got_shape.len() - 1];
+                let want_shape = &want_shape[..want_shape.len() - 1];
+
+                if let Some(rest) = got_shape.strip_prefix([".param", ".u64", ".ptr"].as_slice()) {
+                    // The one accepted divergence: MirPtrType::get_global
+                    // stamps every pointer parameter with an explicit
+                    // address space and pointee alignment; nvcc's frontend
+                    // does not carry either into the .param declaration.
+                    // Every pointer cudarc passes is a global allocation of
+                    // natural alignment, so this is an address-space and
+                    // optimiser-hint annotation, not a calling-convention
+                    // change: the word underneath is still one .u64.
+                    assert_eq!(
+                        rest.first().copied(),
+                        Some(".global"),
+                        "{} word {index}: unexpected pointer annotation {got_shape:?}",
+                        op.name
+                    );
+                    assert_eq!(
+                        rest.get(1).copied(),
+                        Some(".align"),
+                        "{} word {index}: unexpected pointer annotation {got_shape:?}",
+                        op.name
+                    );
+                    assert!(
+                        rest.get(2).is_some_and(|n| n.parse::<u32>().is_ok()),
+                        "{} word {index}: `.align` was not followed by a number: {got_shape:?}",
+                        op.name
+                    );
+                    assert_eq!(
+                        rest.len(),
+                        3,
+                        "{} word {index}: unexpected trailing tokens after `.align N`: {got_shape:?}",
+                        op.name
+                    );
+                    // The divergence is a checked fact, not prose: nvcc must
+                    // not have emitted `.ptr` for the corresponding word, or
+                    // this is no longer the known, accepted divergence.
+                    assert!(
+                        !want_shape.contains(&".ptr"),
+                        "{} word {index}: nvcc unexpectedly emitted a `.ptr` annotation too: {want_shape:?}",
+                        op.name
+                    );
+                    assert_eq!(
+                        &got_shape[..2],
+                        want_shape,
+                        "{} word {index}: builder {got_shape:?} against nvcc {want_shape:?}",
+                        op.name
+                    );
+                } else {
+                    // No pointer annotation on our side: nothing to
+                    // normalise, the two declarations must agree exactly.
+                    assert_eq!(
+                        got_shape,
+                        want_shape,
+                        "{} word {index}: builder {got_shape:?} against nvcc {want_shape:?}",
+                        op.name
+                    );
+                }
             }
         }
     }

@@ -111,9 +111,9 @@ pub fn nvcc_ptx_for(cu_path: &std::path::Path, include_dir: &std::path::Path, ar
         cu_path.display(),
         String::from_utf8_lossy(&out_result.stderr)
     );
-    let text = std::fs::read_to_string(&out).unwrap();
+    let read = std::fs::read_to_string(&out);
     let _ = std::fs::remove_dir_all(&dir);
-    text
+    read.unwrap_or_else(|error| panic!("could not read {}: {error}", out.display()))
 }
 
 /// The `.param` lines of one entry, in declaration order.
