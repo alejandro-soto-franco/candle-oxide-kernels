@@ -1,0 +1,161 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins nightly-2026-04-03 but lists only rust-src,
+      # rustc-dev and llvm-tools as components. Add rustfmt explicitly so it
+      # resolves against the same nightly the other jobs use.
+      - name: Install rustfmt for the pinned nightly
+        run: rustup component add rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+
+      # rust-toolchain.toml does not list clippy as a component either.
+      - name: Install clippy for the pinned nightly
+        run: rustup component add clippy
+
+      # Linting the whole workspace builds candle-oxide-codegen and xtask,
+      # which pull in cuda-oxide-codegen, dialect-mir, dialect-nvvm and
+      # pliron. Install the same CUDA toolkit and LLVM 21 the codegen job
+      # uses so a lint-only run resolves the same dependency graph.
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.35
+        id: cuda-toolkit
+        with:
+          cuda: "13.1.1"
+          method: network
+          sub-packages: '["nvcc", "cudart-dev"]'
+
+      - name: Install LLVM 21 (llc/opt for the NVPTX backend)
+        run: |
+          set -euo pipefail
+          source /etc/os-release
+          sudo install -d -m 0755 /etc/apt/keyrings
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/keyrings/apt-llvm-org.asc >/dev/null
+          echo "deb [signed-by=/etc/apt/keyrings/apt-llvm-org.asc] https://apt.llvm.org/${VERSION_CODENAME}/ llvm-toolchain-${VERSION_CODENAME}-21 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm-21.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends llvm-21
+          llc-21 --version | head -2
+          opt-21 --version | head -2
+
+      - name: Run clippy
+        env:
+          CUDA_TOOLKIT_PATH: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  kernels:
+    name: kernels (stable, no CUDA toolkit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+
+      # This is the job that proves the published crate builds on stable
+      # with no dependencies. rust-toolchain.toml pins nightly-2026-04-03
+      # for the rest of the workspace, and cargo reads that file for every
+      # invocation in this checkout regardless of the default toolchain, so
+      # installing stable is not enough on its own. Every cargo call below
+      # uses the `+stable` override to defeat the pin; dropping it would
+      # silently run these tests on the workspace's nightly again.
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Confirm no CUDA toolkit is present on this runner
+        run: |
+          if command -v nvcc >/dev/null 2>&1; then
+            echo "nvcc is on PATH; this job is supposed to prove the crate needs none" >&2
+            exit 1
+          fi
+
+      - name: Confirm this job runs on stable, not the workspace's pinned nightly
+        run: cargo +stable --version
+
+      - name: Run candle-oxide-kernels tests
+        run: cargo +stable test -p candle-oxide-kernels
+
+  codegen:
+    name: codegen (builder, ABI, reproducibility)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+
+      # candle-oxide-codegen and xtask depend on cuda-oxide-codegen,
+      # dialect-mir, dialect-nvvm and pliron, all pinned to
+      # NVlabs/cuda-oxide rev 0810ba95ff9dcf1ca379b779d3ebe33a8899b15d (see
+      # candle-oxide-codegen/Cargo.toml). NVIDIA has stated it is folding
+      # cuda-oxide into a cuda-rust mono-repo alongside cutile-rs, so crate
+      # paths may move and this repository may end up archived. That does
+      # not affect candle-oxide-kernels, which depends on neither crate and
+      # ships committed PTX; it affects only this job and a maintainer
+      # regenerating the artefacts. If this job starts failing with a git
+      # fetch error against NVlabs/cuda-oxide, that relocation is the first
+      # thing to check, not a transient network fault. The durable copy of
+      # the pinned rev lives in the maintainer's local $CUDA_OXIDE
+      # worktree; there is no fallback fetch mechanism here.
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.35
+        id: cuda-toolkit
+        with:
+          cuda: "13.1.1"
+          method: network
+          sub-packages: '["nvcc", "cudart-dev"]'
+
+      - name: Install LLVM 21 (llc/opt for the NVPTX backend)
+        run: |
+          set -euo pipefail
+          source /etc/os-release
+          sudo install -d -m 0755 /etc/apt/keyrings
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/keyrings/apt-llvm-org.asc >/dev/null
+          echo "deb [signed-by=/etc/apt/keyrings/apt-llvm-org.asc] https://apt.llvm.org/${VERSION_CODENAME}/ llvm-toolchain-${VERSION_CODENAME}-21 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm-21.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends llvm-21
+          llc-21 --version | head -2
+          opt-21 --version | head -2
+
+      # Covers tier 1 (builder), tier 2 (ABI) and tier 5 (reproducibility,
+      # xtask/tests/reproducible.rs). Tier 4, GPU parity, needs a live GPU
+      # that no CI runner here has. It lives in the consuming `candle`
+      # checkout, not in this repository, and runs as
+      # `cargo test -p candle-core --features cuda,oxide-kernels --test
+      # oxide_parity` on a machine with a CUDA device. Run it locally
+      # before relying on a change that touches kernel bodies.
+      - name: Run candle-oxide-codegen and xtask tests
+        env:
+          CUDA_TOOLKIT_PATH: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}
+        run: cargo test -p candle-oxide-codegen -p xtask
