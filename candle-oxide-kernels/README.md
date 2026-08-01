@@ -12,6 +12,43 @@ The committed PTX targets `sm_75` (Turing). Every load goes through the CUDA dri
 
 Every pointer parameter carries a `.ptr .global .align 1` annotation, the most conservative alignment declaration possible. Neither this pipeline nor nvcc vectorises loads for these entries, so the annotation costs nothing: there is no wider load for it to inhibit.
 
+## Verification
+
+These kernels are bit-exact against Candle's own nvcc-built kernels. The parity suite in the
+consuming Candle checkout runs 63 cases at difference exactly 0.0, with no tolerance, covering
+both dtypes, all four binary layout paths and both unary ones, contiguous and strided, at 4096
+and at 4194304 elements, including a deliberately undersized launch grid so the grid-stride
+loop wraps.
+
+Every one of the 46 shipped entries was additionally compared against its nvcc-built
+counterpart on hardware over 64 special values: NaN, positive and negative infinity, signed
+zeros, subnormals, the extremes of the float range, and the Payne-Hanek argument-reduction
+trigger points for the trigonometric entries. Zero bit differences.
+
+Candle's own test suite passes with these kernels substituted for its own.
+
+Routing was confirmed by mutation rather than by inspection. Corrupting a single entry in the
+committed PTX fails exactly the cases that exercise it, at each of the three dispatch sites
+Candle loads through.
+
+## Performance
+
+Measured on an RTX 5060 Laptop against Candle's stock kernels, negating 4194304 f32 elements,
+three interleaved runs, medians:
+
+| Layout | Stock | These kernels |
+| --- | --- | --- |
+| Contiguous | 59.9 us | 62.3 us |
+| Strided | 251.5 us | 239.2 us |
+
+About 4 per cent slower on the contiguous path and about 4 per cent faster on the strided one.
+Both figures reproduce across runs.
+
+The contiguous difference comes from the launch geometry rather than from the loop. Candle
+launches one thread per element, so each thread executes the loop body once and the prologue
+dominates: 36 instructions against 35 for the stock kernel, with 31 registers against 26 and no
+occupancy consequence. The strided gain comes from a leaner index decomposition.
+
 ## Limitations
 
 `ucopy_f32` and `ucopy_f64` are declared in `UNARY_ENTRIES` and present in `unary.ptx`, but Candle's tensor API never reaches them: `copy_strided_src` loads `ucopy` directly from Candle's stock kernel module. These two entries are unreachable through the tensor API today.
