@@ -22,9 +22,9 @@ impl DType {
 pub enum Arity {
     Unary,
     Binary,
-    /// One of the fused chains, whose parameter list follows from the chain
-    /// named in [`Body::Fused`] rather than from a buffer count: the three
-    /// chains take five, six and seven words.
+    /// One of the fused family's entries, whose parameter list follows from
+    /// the kind named in [`Body::Fused`] rather than from a buffer count:
+    /// the five kinds take three, four, four, five and five words.
     Fused,
 }
 
@@ -47,20 +47,24 @@ pub enum CmpKind {
     Ge,
 }
 
-/// One of the three fused chains, each replacing a run of two Candle
-/// elementwise kernels with a single pass.
+/// One entry of the fused family.
+///
+/// What the family's entries share is that each takes its index from the
+/// launch geometry rather than computing it. The grid is shaped like the
+/// tensor, so every index term is a special register or the induction
+/// variable and no entry divides. Three of the five also fuse a run of two
+/// Candle kernels into one pass; the other two are a single traversal that
+/// Candle already performs, run without `get_strided_index`.
 ///
 /// The variant fixes the parameter list and the arithmetic together, since
-/// for a fused entry the two are one choice. Every chain assumes contiguous
+/// for a fused entry the two are one choice. Every entry assumes contiguous
 /// operands, which is what lets an operand index be an explicit expression
 /// rather than a `num_dims`-deep walk.
 ///
-/// The launch is shaped like the tensor: `ctaid.x` walks the last dimension
-/// and the `y` and `z` dimensions carry the row, so every index term is a
-/// special register and no chain divides. See `fused.rs`. `row` below is the
-/// element offset of the block's row, and `col` the column within it.
+/// See `fused.rs` for the geometry. `row` below is the element offset of the
+/// block's row and `col` the column within it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum FusedChain {
+pub enum FusedKind {
     /// `out[row + col] = (x[row + col] * scale + 0.0f) + mask[b * ss + col]`,
     /// over `x` of shape `[B, H, S, S]` and `mask` of shape `[B, 1, S, S]`,
     /// with `ss = S*S`, `b = ctaid.z` and `row = (b * nctaid.y + ctaid.y) * ss`.
@@ -80,10 +84,30 @@ pub enum FusedChain {
     /// evaluates, `Linear::forward` adding the bias before the caller adds
     /// the residual, and reassociating changes the result.
     BiasResidual,
+    /// `out[row + col] = x[row + col] + bias[col]`, with `row = ctaid.y * d`.
+    ///
+    /// [`FusedKind::BiasGeluErf`] without the activation. It replaces the
+    /// last-dimension broadcast add, which is every remaining `badd_f32` in
+    /// the profile: three projection biases a layer and two embedding adds.
+    /// Candle routes a broadcast down its strided path, since a broadcast
+    /// carries a zero stride, so the kernel this displaces walks
+    /// `num_dims` deep for an index this one reads from the grid.
+    Bias,
+    /// `out[((b * D2 + j) * D1 + i) * d + k] = src[((b * D1 + i) * D2 + j) * d + k]`,
+    /// a rank-4 copy under a swap of dimensions 1 and 2, with `b = ctaid.z`,
+    /// `i = ctaid.y`, `j = ctaid.x`, `D1 = nctaid.y` and `D2 = nctaid.x`.
+    ///
+    /// Both head transposes in the attention path are this shape, one each
+    /// way. `ctaid.x` names the dimension being permuted, so it cannot also
+    /// index the column: `k` runs from `tid.x` alone, stepping by `ntid.x`.
+    ///
+    /// This is the one kind whose read and write rows differ, which is what
+    /// the permutation is.
+    Permute12,
 }
 
-impl FusedChain {
-    /// The libdevice symbol this chain calls, if it calls one.
+impl FusedKind {
+    /// The libdevice symbol this entry calls, if it calls one.
     ///
     /// `__nv_normcdff` is what Candle reaches through `normcdfg`
     /// (`cuda_utils.cuh:140`) and `gelu_erf_fwd` (`unary.cu:32-33`). Any
@@ -91,8 +115,11 @@ impl FusedChain {
     /// replaces.
     pub fn libdevice_name(self) -> Option<&'static str> {
         match self {
-            FusedChain::BiasGeluErf => Some("__nv_normcdff"),
-            FusedChain::ScaleMask | FusedChain::BiasResidual => None,
+            FusedKind::BiasGeluErf => Some("__nv_normcdff"),
+            FusedKind::ScaleMask
+            | FusedKind::BiasResidual
+            | FusedKind::Bias
+            | FusedKind::Permute12 => None,
         }
     }
 }
@@ -116,10 +143,10 @@ pub enum Body {
     /// A libdevice call named directly, one argument per operand. The name
     /// is the f32 form; `libdevice_name` picks the f64 form by dtype.
     Libdevice(&'static str),
-    /// A fused chain, whose loads, index arithmetic and stores are one
-    /// expression rather than a function of already-loaded operands.
+    /// A fused family entry, whose loads, index arithmetic and stores are
+    /// one expression rather than a function of already-loaded operands.
     /// `fused.rs` emits it whole, so `emit_body` never sees this.
-    Fused(FusedChain),
+    Fused(FusedKind),
 }
 
 /// Which PTX artifact an entry is packaged into.
@@ -175,10 +202,10 @@ impl OpDesc {
         }
     }
 
-    /// The chain this entry computes, for a fused entry.
-    pub fn chain(&self) -> Option<FusedChain> {
+    /// The kind this entry computes, for a fused entry.
+    pub fn kind(&self) -> Option<FusedKind> {
         match self.body {
-            Body::Fused(chain) => Some(chain),
+            Body::Fused(kind) => Some(kind),
             _ => None,
         }
     }
@@ -187,9 +214,9 @@ impl OpDesc {
     pub fn libdevice_name(&self) -> Option<&'static str> {
         let f32_name = match self.body {
             Body::Libdevice(name) => name,
-            // The fused chains are f32 only, so the chain names its symbol
+            // The fused family is f32 only, so the kind names its symbol
             // directly and the dtype table below is bypassed.
-            Body::Fused(chain) => return chain.libdevice_name(),
+            Body::Fused(kind) => return kind.libdevice_name(),
             _ => return None,
         };
         Some(match (f32_name, self.dtype) {
@@ -238,13 +265,13 @@ fn unary(stem: &str, dtype: DType, body: Body) -> OpDesc {
     }
 }
 
-fn fused(stem: &str, chain: FusedChain) -> OpDesc {
+fn fused(stem: &str, kind: FusedKind) -> OpDesc {
     OpDesc {
         name: format!("{stem}_{}", DType::F32.suffix()),
         dtype: DType::F32,
         arity: Arity::Fused,
         out: OutType::Same,
-        body: Body::Fused(chain),
+        body: Body::Fused(kind),
     }
 }
 
@@ -287,15 +314,17 @@ pub fn unary_ops() -> Vec<OpDesc> {
     ops
 }
 
-/// Every fused chain entry.
+/// Every fused family entry.
 ///
-/// f32 only. The chains exist for one model's f32 forward pass, and an f64
-/// form would ship three entries nothing calls.
+/// f32 only. The entries exist for one model's f32 forward pass, and an f64
+/// form would ship five entries nothing calls.
 pub fn fused_ops() -> Vec<OpDesc> {
     vec![
-        fused("fused_scale_mask", FusedChain::ScaleMask),
-        fused("fused_bias_gelu_erf", FusedChain::BiasGeluErf),
-        fused("fused_bias_residual", FusedChain::BiasResidual),
+        fused("fused_scale_mask", FusedKind::ScaleMask),
+        fused("fused_bias_gelu_erf", FusedKind::BiasGeluErf),
+        fused("fused_bias_residual", FusedKind::BiasResidual),
+        fused("fused_bias", FusedKind::Bias),
+        fused("fused_permute12", FusedKind::Permute12),
     ]
 }
 

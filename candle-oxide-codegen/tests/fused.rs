@@ -1,6 +1,6 @@
 //! Structural assertions on the fused family: the ABI each entry declares,
-//! the libdevice symbol the GELU chain resolves to, and the FMA contraction
-//! gate.
+//! the libdevice symbol the GELU entry resolves to, the FMA contraction gate
+//! and the division gate.
 //!
 //! The consumer side is written in a separate repository against the same
 //! interface, so a parameter word that moves here breaks a caller that
@@ -11,6 +11,13 @@
 use candle_oxide_codegen::build_family;
 use candle_oxide_codegen::desc::{fused_ops, Family};
 use candle_oxide_codegen::testing::{entry_body, entry_params};
+
+/// Every entry the family declares, read from the op table rather than
+/// listed here, so an entry added later is covered by the gates below
+/// without an edit.
+fn fused_names() -> Vec<String> {
+    fused_ops().into_iter().map(|op| op.name).collect()
+}
 
 /// The whole family, built at the architecture the other builder tests use.
 fn fused_ptx() -> String {
@@ -37,13 +44,21 @@ const PTR: &str = ".param .u64 .ptr .global .align 1";
 const WORD: &str = ".param .u64";
 
 #[test]
-fn the_family_holds_exactly_the_three_chains() {
+fn the_family_holds_exactly_the_entries_the_table_names() {
     let ptx = fused_ptx();
-    for name in [
-        "fused_scale_mask_f32",
-        "fused_bias_gelu_erf_f32",
-        "fused_bias_residual_f32",
-    ] {
+    let names = fused_names();
+    assert_eq!(
+        names,
+        vec![
+            "fused_scale_mask_f32",
+            "fused_bias_gelu_erf_f32",
+            "fused_bias_residual_f32",
+            "fused_bias_f32",
+            "fused_permute12_f32",
+        ],
+        "the family's entry names are part of the interface"
+    );
+    for name in &names {
         assert!(
             ptx.contains(&format!(".visible .entry {name}(")),
             "{name} missing:\n{ptx}"
@@ -51,8 +66,8 @@ fn the_family_holds_exactly_the_three_chains() {
     }
     assert_eq!(
         ptx.matches(".visible .entry ").count(),
-        3,
-        "the fused family declares three entries and no others"
+        names.len(),
+        "the fused family declares the table's entries and no others"
     );
 }
 
@@ -103,6 +118,84 @@ fn bias_residual_declares_five_words() {
     );
 }
 
+#[test]
+fn bias_declares_four_words() {
+    let ptx = fused_ptx();
+    assert_eq!(
+        param_shapes(&ptx, "fused_bias_f32"),
+        vec![
+            WORD, // d
+            PTR,  // x
+            PTR,  // bias
+            PTR,  // out
+        ],
+        "fused_bias_f32 ABI:\n{ptx}"
+    );
+}
+
+#[test]
+fn permute12_declares_three_words() {
+    let ptx = fused_ptx();
+    assert_eq!(
+        param_shapes(&ptx, "fused_permute12_f32"),
+        vec![
+            WORD, // d
+            PTR,  // src
+            PTR,  // out
+        ],
+        "fused_permute12_f32 ABI:\n{ptx}"
+    );
+}
+
+/// The permutation is entirely in the two row bases, so the loop body loads
+/// and stores and computes nothing else. A floating-point instruction in
+/// there would mean the copy stopped being a copy.
+#[test]
+fn permute12_only_copies() {
+    let ptx = fused_ptx();
+    let body = entry_body(&ptx, "fused_permute12_f32");
+    for arithmetic in [".f32", "fma.rn", "mul.rn", "add.rn"] {
+        assert_eq!(
+            body.matches(arithmetic).count(),
+            0,
+            "fused_permute12_f32 carries a {arithmetic}; a copy computes \
+             nothing:\n{body}"
+        );
+    }
+    assert_eq!(
+        body.matches("ld.global").count(),
+        1,
+        "fused_permute12_f32 loads once an element:\n{body}"
+    );
+    assert_eq!(
+        body.matches("st.global").count(),
+        1,
+        "fused_permute12_f32 stores once an element:\n{body}"
+    );
+}
+
+/// `fused_bias_f32` is the GELU entry with the activation removed, so its
+/// body is the same two loads and one add, and nothing more.
+#[test]
+fn bias_adds_once_and_calls_nothing() {
+    let ptx = fused_ptx();
+    let body = entry_body(&ptx, "fused_bias_f32");
+    assert_eq!(
+        body.matches("add.rn.f32").count(),
+        1,
+        "fused_bias_f32 declares one add:\n{body}"
+    );
+    assert_eq!(
+        body.matches("mul.rn.f32").count(),
+        0,
+        "fused_bias_f32 has no activation to multiply by:\n{body}"
+    );
+    assert!(
+        !body.contains("__nv_"),
+        "fused_bias_f32 calls no libdevice symbol:\n{body}"
+    );
+}
+
 /// The division gate.
 ///
 /// The launch is shaped like the tensor so that every index term comes from
@@ -116,12 +209,8 @@ fn bias_residual_declares_five_words() {
 #[test]
 fn no_fused_entry_divides() {
     let ptx = fused_ptx();
-    for name in [
-        "fused_scale_mask_f32",
-        "fused_bias_gelu_erf_f32",
-        "fused_bias_residual_f32",
-    ] {
-        let body = entry_body(&ptx, name);
+    for name in fused_names() {
+        let body = entry_body(&ptx, &name);
         for divide in ["div.u32", "rem.u32", "div.u64", "rem.u64"] {
             assert_eq!(
                 body.matches(divide).count(),
@@ -133,7 +222,7 @@ fn no_fused_entry_divides() {
     }
 }
 
-/// The grid coordinates each chain reads, which is the other half of the
+/// The grid coordinates each entry reads, which is the other half of the
 /// division gate: an entry could drop its divisions by taking the row as a
 /// parameter again, and this pins that the row comes from the launch.
 #[test]
@@ -150,9 +239,24 @@ fn each_chain_reads_the_grid_coordinates_its_geometry_names() {
         );
     }
 
+    // `(D2, D1, B)`: both permuted dimensions are grid extents, so the
+    // entry reads `nctaid.x` for `D2` as well as `nctaid.y` for `D1`, and
+    // neither is a parameter.
+    let permute = entry_body(&ptx, "fused_permute12_f32");
+    for sreg in ["%ctaid.x", "%ctaid.y", "%ctaid.z", "%nctaid.x", "%nctaid.y"] {
+        assert!(
+            permute.contains(sreg),
+            "fused_permute12_f32 does not read {sreg}:\n{permute}"
+        );
+    }
+
     // `(ceil(d / block), rows, 1)`: one row per `ctaid.y`, and the z
     // dimension is unused, so reading it would mean the geometry drifted.
-    for name in ["fused_bias_gelu_erf_f32", "fused_bias_residual_f32"] {
+    for name in [
+        "fused_bias_gelu_erf_f32",
+        "fused_bias_residual_f32",
+        "fused_bias_f32",
+    ] {
         let body = entry_body(&ptx, name);
         for sreg in ["%ctaid.x", "%ctaid.y"] {
             assert!(body.contains(sreg), "{name} does not read {sreg}:\n{body}");
@@ -241,17 +345,22 @@ fn only_the_fused_family_switches_contraction_off() {
     assert!(!Family::Fused.fma_contraction());
 }
 
-/// A fused set without the GELU chain names no libdevice symbol, so it
+/// A fused set without the GELU entry names no libdevice symbol, so it
 /// compiles self-contained. This is the first op set in the workspace to
 /// reach that path in `build_family`.
 #[test]
-fn a_chain_set_without_the_gelu_entry_needs_no_libdevice() {
+fn a_fused_set_without_the_gelu_entry_needs_no_libdevice() {
     let ops: Vec<_> = fused_ops()
         .into_iter()
         .filter(|op| op.libdevice_name().is_none())
         .collect();
-    assert_eq!(ops.len(), 2, "only the GELU chain calls libdevice");
+    assert_eq!(ops.len(), 4, "only the GELU entry calls libdevice");
     let ptx = build_family(Family::Fused, &ops, "sm_80").unwrap();
-    assert!(ptx.contains(".visible .entry fused_scale_mask_f32("));
-    assert!(ptx.contains(".visible .entry fused_bias_residual_f32("));
+    for op in &ops {
+        assert!(
+            ptx.contains(&format!(".visible .entry {}(", op.name)),
+            "{} missing from the self-contained build:\n{ptx}",
+            op.name
+        );
+    }
 }

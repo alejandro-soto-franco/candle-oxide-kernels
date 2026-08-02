@@ -14,12 +14,14 @@ pub const BINARY: &str = include_str!("../ptx/binary.ptx");
 /// PTX holding every unary entry point.
 pub const UNARY: &str = include_str!("../ptx/unary.ptx");
 
-/// PTX holding every fused chain entry point.
+/// PTX holding every fused family entry point.
 ///
-/// Each entry replaces a run of two elementwise kernels with one
-/// grid-stride pass and assumes contiguous f32 operands. A caller that
-/// cannot establish that precondition evaluates the reference expression
-/// instead.
+/// What the entries share is that each takes its index from the launch
+/// geometry rather than computing it, and each assumes contiguous f32
+/// operands. Three also collapse a run of two elementwise kernels into one
+/// pass; the other two are a single traversal Candle already performs, run
+/// without an index computation. A caller that cannot establish the
+/// preconditions evaluates the reference expression instead.
 pub const FUSED: &str = include_str!("../ptx/fused.ptx");
 
 /// Key for `get_or_load_custom_func` when loading [`BINARY`].
@@ -113,19 +115,39 @@ pub const UNARY_ENTRIES: &[&str] = &[
 ///                         residual: *const f32, out: *mut f32)
 ///     same geometry
 ///     out[row + col] = (x[row + col] + bias[col]) + residual[row + col]
+///
+/// fused_bias_f32(d: size_t, x: *const f32, bias: *const f32, out: *mut f32)
+///     same geometry
+///     out[row + col] = x[row + col] + bias[col]
+///
+/// fused_permute12_f32(d: size_t, src: *const f32, out: *mut f32)
+///     grid (D2, D1, B), block (min(round_up_32(d), 256), 1, 1)
+///     b = ctaid.z,  i = ctaid.y,  j = ctaid.x
+///     D1 = nctaid.y,  D2 = nctaid.x
+///     k = tid.x, strided by ntid.x while k < d
+///     out[((b * D2 + j) * D1 + i) * d + k]
+///         = src[((b * D1 + i) * D2 + j) * d + k]
 /// ```
 ///
 /// `fused_scale_mask_f32` reads `x` as `[B, H, S, S]` and `mask` as
 /// `[B, 1, S, S]`, with `ss = S*S`. The head count arrives as `nctaid.y`
-/// rather than as a parameter. `rows` for the other two is every dimension
-/// but the last. Every operand of every entry must be contiguous and f32.
+/// rather than as a parameter. `rows` for the bias entries is every
+/// dimension but the last. `fused_permute12_f32` copies a rank-4 tensor
+/// whose logical shape is `[B, D2, D1, d]` over a contiguous source of shape
+/// `[B, D1, D2, d]`, and takes both `D1` and `D2` from the grid. Every
+/// operand of every entry must be contiguous and f32.
 ///
 /// No entry takes an element count, and none divides: the launch is shaped
 /// like the tensor, so every index term is a special register or the
 /// induction variable. CUDA caps `gridDim.y` and `gridDim.z` at 65535, so a
-/// caller whose `H`, `B` or `rows` exceeds that evaluates the reference
-/// expression instead. `ss` and `d` must be non-zero, now as loop bounds
-/// rather than as divisors.
+/// caller whose `H`, `B`, `D1` or `rows` exceeds that evaluates the
+/// reference expression instead. `ss` and `d` must be non-zero, as loop
+/// bounds rather than as divisors.
+///
+/// `fused_permute12_f32` takes its column from `tid.x` alone, stepping by
+/// `ntid.x`, because `ctaid.x` names a permuted dimension and cannot also
+/// index the column. Every other entry takes its column from
+/// `ctaid.x * ntid.x + tid.x`, stepping by `ntid.x * nctaid.x`.
 ///
 /// `fused_scale_mask_f32` replaces `affine_f32` followed by `badd_f32`,
 /// and `affine_f32`'s body is
@@ -140,6 +162,8 @@ pub const FUSED_ENTRIES: &[&str] = &[
     "fused_scale_mask_f32",
     "fused_bias_gelu_erf_f32",
     "fused_bias_residual_f32",
+    "fused_bias_f32",
+    "fused_permute12_f32",
 ];
 
 /// Whether `module` provides `name`. Returns false for an unknown module.

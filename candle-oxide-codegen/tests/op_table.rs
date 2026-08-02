@@ -1,4 +1,4 @@
-use candle_oxide_codegen::desc::{all_ops, Arity, DType, Family, FusedChain, OutType};
+use candle_oxide_codegen::desc::{all_ops, Arity, DType, Family, FusedKind, OutType};
 
 #[test]
 fn the_table_covers_the_v1_surface() {
@@ -33,13 +33,14 @@ fn the_table_covers_the_v1_surface() {
             assert!(names.contains(&want.as_str()), "missing {want}");
         }
     }
-    // 3 fused chains, f32 only. Each replaces a run of two elementwise
-    // kernels, so each carries its own parameter list and its own body
-    // rather than a stem crossed with a dtype.
-    for (stem, chain) in [
-        ("fused_scale_mask", FusedChain::ScaleMask),
-        ("fused_bias_gelu_erf", FusedChain::BiasGeluErf),
-        ("fused_bias_residual", FusedChain::BiasResidual),
+    // 5 fused entries, f32 only. Each carries its own parameter list and its
+    // own body rather than a stem crossed with a dtype.
+    for (stem, kind) in [
+        ("fused_scale_mask", FusedKind::ScaleMask),
+        ("fused_bias_gelu_erf", FusedKind::BiasGeluErf),
+        ("fused_bias_residual", FusedKind::BiasResidual),
+        ("fused_bias", FusedKind::Bias),
+        ("fused_permute12", FusedKind::Permute12),
     ] {
         let want = format!("{stem}_f32");
         let op = ops
@@ -48,7 +49,7 @@ fn the_table_covers_the_v1_surface() {
             .unwrap_or_else(|| panic!("missing {want}"));
         assert_eq!(op.arity, Arity::Fused);
         assert_eq!(op.family(), Family::Fused, "{want} ships in fused.ptx");
-        assert_eq!(op.chain(), Some(chain));
+        assert_eq!(op.kind(), Some(kind));
         assert_eq!(op.dtype, DType::F32, "{want} has no f64 form");
         assert_eq!(op.out, OutType::Same);
         assert!(
@@ -56,7 +57,7 @@ fn the_table_covers_the_v1_surface() {
             "{stem} must not ship an f64 form nothing calls"
         );
     }
-    // Only the GELU chain calls libdevice, which is what decides whether a
+    // Only the GELU entry calls libdevice, which is what decides whether a
     // fused build links against it.
     assert_eq!(
         ops.iter()
@@ -66,15 +67,15 @@ fn the_table_covers_the_v1_surface() {
         vec!["fused_bias_gelu_erf_f32"]
     );
     assert_eq!(
-        FusedChain::BiasGeluErf.libdevice_name(),
+        FusedKind::BiasGeluErf.libdevice_name(),
         Some("__nv_normcdff"),
         "any other Gaussian CDF loses bit-exactness against ugelu_erf_f32"
     );
 
     assert_eq!(
         ops.len(),
-        49,
-        "12 binary + 12 comparison + 22 unary + 3 fused"
+        51,
+        "12 binary + 12 comparison + 22 unary + 5 fused"
     );
 }
 

@@ -112,7 +112,7 @@ pub fn const_u64(ctx: &mut Context, block: Ptr<BasicBlock>, value: u64) -> Value
 }
 
 /// A 32-bit float constant, the width `affine.cu`'s `add` operand carries at
-/// f32 and so the width `FusedChain::ScaleMask` needs for its literal `0.0f`.
+/// f32 and so the width `FusedKind::ScaleMask` needs for its literal `0.0f`.
 pub fn const_f32(ctx: &mut Context, block: Ptr<BasicBlock>, value: f32) -> Value {
     let f32_ty: TypeHandle = FP32Type::get(ctx).into();
     let op = Operation::new(

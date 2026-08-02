@@ -6,7 +6,7 @@ against Candle's own nvcc-built kernels.
 
 ## Crates
 
-- **`candle-oxide-kernels`** is the published crate. It ships 49 precompiled
+- **`candle-oxide-kernels`** is the published crate. It ships 51 precompiled
   entry points across three PTX modules (`oxide::binary`, `oxide::unary`,
   `oxide::fused`), carries no build dependencies, and needs no nightly
   toolchain. See `candle-oxide-kernels/README.md`.
