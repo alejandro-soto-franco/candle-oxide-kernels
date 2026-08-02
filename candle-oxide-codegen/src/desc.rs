@@ -103,6 +103,24 @@ pub enum FusedKind {
     ///
     /// This is the one kind whose read and write rows differ, which is what
     /// the permutation is.
+    ///
+    /// One row a block leaves `min(round_up_32(d), 256)` threads in it, 64
+    /// at this model's head size, and stacking `rows` of them along `y` to
+    /// fill the block back up has been tried and is slower. Measured against
+    /// the committed entry on an RTX 5060 Laptop, medians of nine
+    /// interleaved runs of 100 launches at the model's own 8.9M elements and
+    /// at four times that: a block of `(64, 2, 1)` gives up 0.2 to 8.5 per
+    /// cent, `(64, 4, 1)` 3.9 to 16.2, and `(64, 8, 1)` 8.7 to 27.6. The
+    /// degradation is monotonic in the depth and holds at both transposes.
+    /// Deepening the block multiplies the scatter the permutation already
+    /// has on one side, since consecutive `tid.y` values address rows far
+    /// apart in both operands.
+    ///
+    /// The entry needs no widening anyway: in isolation it runs at 316 to
+    /// 329 GB/s where a straight `cuMemcpyDtoD` of the same bytes reaches
+    /// 319.6, so it is already at this device's copy bandwidth. A lower
+    /// figure seen inside a full forward pass comes from the surrounding
+    /// context rather than from the launch geometry.
     Permute12,
     /// [`FusedKind::ScaleMask`] with Candle's softmax folded onto it, so the
     /// score tensor is never written between the two.
