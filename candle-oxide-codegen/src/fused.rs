@@ -16,7 +16,7 @@
 
 use crate::body::call;
 use crate::desc::{FusedChain, OpDesc};
-use crate::emit::{cond_br, emit, goto, module_block, new_block, widen_u32_to_u64, Tys};
+use crate::emit::{cond_br, const_f32, emit, goto, module_block, new_block, widen_u32_to_u64, Tys};
 use cuda_oxide_codegen::experimental::CodegenModule;
 use dialect_mir::ops::{
     MirAddOp, MirDivOp, MirFuncOp, MirLoadOp, MirLtOp, MirMulOp, MirPtrOffsetOp, MirRemOp,
@@ -287,12 +287,23 @@ fn emit_chain(
     i: Value,
 ) -> Value {
     match chain {
-        // `out[i] = x[i] * scale + mask[(i / hss) * ss + (i % ss)]`.
+        // `out[i] = (x[i] * scale + 0.0f) + mask[(i / hss) * ss + (i % ss)]`.
         //
-        // The multiply and the add stay two roundings. `Family::fma_contraction`
-        // is what keeps them apart; contraction would fold the pair into one
-        // FMA and diverge from the `affine_f32` then `badd_f32` pair this
-        // replaces, which rounds the product to memory before it adds.
+        // The multiply and the mask add stay two roundings.
+        // `Family::fma_contraction` is what keeps them apart; contraction
+        // would fold the pair into one FMA and diverge from the `affine_f32`
+        // then `badd_f32` pair this replaces, which rounds the product to
+        // memory before it adds.
+        //
+        // The `+ 0.0f` is the `add` operand of `affine_f32`, which Candle
+        // reaches through `Tensor::affine(scale, 0.0)` and whose body is
+        // `x * mul + add` (`affine.cu:19`). It is dead for every value
+        // except one: a product of `-0.0` becomes `+0.0`, since `-0.0 + 0.0`
+        // is `+0.0` under round-to-nearest. Dropping it would leave the
+        // `-0.0` in place and disagree with the reference whenever the mask
+        // element is also `-0.0`. The fold `x + 0.0 -> x` is invalid in IEEE
+        // without `nsz`, so the instruction survives; `tests/fused.rs` pins
+        // the count rather than trusting that.
         FusedChain::ScaleMask => {
             let (hss, ss, x, mask, scale) = (args[1], args[2], args[3], args[4], args[6]);
             let xv = load_in(ctx, block, tys, x, i);
@@ -316,12 +327,21 @@ fn emit_chain(
                 vec![xv, scale],
             )
             .unwrap();
+            let zero = const_f32(ctx, block, 0.0);
+            let affine = emit(
+                ctx,
+                block,
+                MirAddOp::get_concrete_op_info(),
+                vec![tys.f],
+                vec![scaled, zero],
+            )
+            .unwrap();
             emit(
                 ctx,
                 block,
                 MirAddOp::get_concrete_op_info(),
                 vec![tys.f],
-                vec![scaled, mv],
+                vec![affine, mv],
             )
             .unwrap()
         }

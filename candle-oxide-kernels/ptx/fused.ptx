@@ -230,7 +230,7 @@ $L__BB1_5:                              // %bb3
 )                                       // @fused_scale_mask_f32
 {
 	.reg .pred 	%p<5>;
-	.reg .b32 	%r<19>;
+	.reg .b32 	%r<20>;
 	.reg .b64 	%rd<17>;
 
 // %bb.0:                               // %entry
@@ -252,7 +252,7 @@ $L__BB1_5:                              // %bb3
 	mov.u32 	%r4, %nctaid.x;
 	mul.lo.s32 	%r5, %r3, %r4;
 	add.s32 	%r9, %r4, %r2;
-	mad.lo.s32 	%r18, %r3, %r9, %r1;
+	mad.lo.s32 	%r19, %r3, %r9, %r1;
 	bra.uni 	$L__BB2_2;
 $L__BB2_6:                              //   in Loop: Header=BB2_2 Depth=1
 	shl.b64 	%rd10, %rd1, 2;
@@ -261,12 +261,13 @@ $L__BB2_6:                              //   in Loop: Header=BB2_2 Depth=1
 	add.s64 	%rd13, %rd11, %rd12;
 	ld.global.b32 	%r14, [%rd13];
 	mul.rn.f32 	%r15, %r7, %r6;
-	add.rn.f32 	%r16, %r15, %r14;
+	add.rn.f32 	%r16, %r15, 0f00000000;
+	add.rn.f32 	%r17, %r16, %r14;
 	add.s64 	%rd14, %rd7, %rd8;
-	st.global.b32 	[%rd14], %r16;
-	cvt.u64.u32 	%rd16, %r18;
+	st.global.b32 	[%rd14], %r17;
+	cvt.u64.u32 	%rd16, %r19;
 	setp.gt.u64 	%p4, %rd2, %rd16;
-	add.s32 	%r18, %r18, %r5;
+	add.s32 	%r19, %r19, %r5;
 	@%p4 bra 	$L__BB2_2;
 	bra.uni 	$L__BB2_7;
 $L__BB2_2:                              // %bb2
@@ -275,11 +276,11 @@ $L__BB2_2:                              // %bb2
 	add.s64 	%rd9, %rd5, %rd8;
 	setp.lt.u64 	%p2, %rd16, %rd3;
 	mov.b64 	%rd15, 0;
-	cvt.u32.u64 	%r17, %rd16;
+	cvt.u32.u64 	%r18, %rd16;
 	@%p2 bra 	$L__BB2_4;
 // %bb.3:                               //   in Loop: Header=BB2_2 Depth=1
 	cvt.u32.u64 	%r10, %rd3;
-	div.u32 	%r11, %r17, %r10;
+	div.u32 	%r11, %r18, %r10;
 	cvt.u64.u32 	%rd15, %r11;
 $L__BB2_4:                              //   in Loop: Header=BB2_2 Depth=1
 	ld.global.b32 	%r6, [%rd9];
@@ -288,7 +289,7 @@ $L__BB2_4:                              //   in Loop: Header=BB2_2 Depth=1
 	@%p3 bra 	$L__BB2_6;
 // %bb.5:                               //   in Loop: Header=BB2_2 Depth=1
 	cvt.u32.u64 	%r12, %rd4;
-	rem.u32 	%r13, %r17, %r12;
+	rem.u32 	%r13, %r18, %r12;
 	cvt.u64.u32 	%rd16, %r13;
 	bra.uni 	$L__BB2_6;
 $L__BB2_7:                              // %bb3

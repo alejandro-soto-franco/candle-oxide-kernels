@@ -89,24 +89,37 @@ fn entry_body<'a>(ptx: &'a str, entry: &str) -> &'a str {
     &ptx[start..end]
 }
 
-/// The contraction gate, applied to the bytes this crate actually ships.
+/// The rounding gates, applied to the bytes this crate actually ships.
 ///
-/// `candle-oxide-codegen/tests/fused.rs` asserts the same thing on PTX built
-/// fresh at `sm_80`. This one reads `fused.ptx` as committed, needs no CUDA
-/// toolkit and no LLVM, and so runs in the job that proves the published
-/// crate stands alone. `fused_scale_mask_f32` replaces `affine_f32` followed
-/// by `badd_f32`, which rounds the product to memory before it adds the
-/// mask, so a contracted multiply-add rounds once where the reference rounds
-/// twice and the entry stops being bit-exact.
+/// `candle-oxide-codegen/tests/fused.rs` asserts the same counts on PTX
+/// built fresh at `sm_80`. This one reads `fused.ptx` as committed, needs no
+/// CUDA toolkit and no LLVM, and so runs in the job that proves the
+/// published crate stands alone.
+///
+/// `fused_scale_mask_f32` replaces `affine_f32` followed by `badd_f32`, so
+/// it rounds three times: the multiply, `affine_f32`'s `+ 0.0f`, and the
+/// mask add. A contracted multiply-add would collapse the first two and a
+/// folded-away zero add would drop the second, and each leaves the entry
+/// computing something the reference does not.
 #[test]
-fn the_shipped_scale_mask_entry_carries_no_contracted_multiply_add() {
+fn the_shipped_scale_mask_entry_rounds_where_the_reference_rounds() {
     let body = entry_body(k::FUSED, "fused_scale_mask_f32");
-    assert!(
-        !body.contains("fma.rn.f32"),
+    assert_eq!(
+        body.matches("fma.rn.f32").count(),
+        0,
         "fused_scale_mask_f32 ships a contracted multiply-add:\n{body}"
     );
-    assert!(body.contains("mul.rn.f32"), "the multiply is gone:\n{body}");
-    assert!(body.contains("add.rn.f32"), "the mask add is gone:\n{body}");
+    assert_eq!(
+        body.matches("mul.rn.f32").count(),
+        1,
+        "fused_scale_mask_f32 ships other than one multiply:\n{body}"
+    );
+    assert_eq!(
+        body.matches("add.rn.f32").count(),
+        2,
+        "fused_scale_mask_f32 ships other than two adds, so either \
+         affine_f32's `+ 0.0f` or the mask add is gone:\n{body}"
+    );
 }
 
 /// Routing is asserted by content rather than by identity: two `&'static

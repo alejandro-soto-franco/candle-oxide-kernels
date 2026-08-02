@@ -124,32 +124,49 @@ fn the_gelu_chain_resolves_normcdff() {
     );
 }
 
-/// The contraction gate.
+/// The contraction gate, and the signed-zero gate alongside it.
 ///
-/// `fused_scale_mask_f32` replaces `affine_f32` followed by `badd_f32`,
-/// which rounds the product to memory before it adds the mask. Contracting
-/// the multiply and the add into one FMA drops that rounding and gives a
-/// more accurate answer than the path being replaced, so the fused kernel
-/// stops being bit-exact. This assertion is what catches a future change to
+/// `fused_scale_mask_f32` replaces `affine_f32` followed by `badd_f32`.
+/// That path rounds the product to memory before it adds the mask, so
+/// contracting the multiply and the add into one FMA drops a rounding and
+/// gives a more accurate answer than the path being replaced, and the fused
+/// kernel stops being bit-exact. This catches a future change to
 /// `Family::fma_contraction`.
+///
+/// The instruction counts are pinned rather than only their presence.
+/// `affine_f32` computes `x * mul + add` with `add` zero, so the entry adds
+/// twice: once for that zero, which turns a `-0.0` product into `+0.0`, and
+/// once for the mask. `x + 0.0 -> x` is an invalid fold in IEEE without
+/// `nsz`, so both survive today; a fast-math or `nsz` flag arriving later
+/// would delete the first one and drift the entry off bit-exactness with no
+/// other outward sign. A count is what surfaces that.
 #[test]
-fn scale_mask_keeps_the_multiply_and_the_add_apart() {
+fn scale_mask_rounds_the_multiply_the_zero_add_and_the_mask_add_apart() {
     let ptx = fused_ptx();
     let body = entry_body(&ptx, "fused_scale_mask_f32");
-    assert!(
-        !body.contains("fma.rn.f32"),
-        "fused_scale_mask_f32 contracted x * scale + mask into an FMA, \
+    assert_eq!(
+        body.matches("fma.rn.f32").count(),
+        0,
+        "fused_scale_mask_f32 contracted a multiply and an add into an FMA, \
          which rounds once where the reference rounds twice:\n{body}"
     );
-    // The pair the FMA would have replaced must still be there, or the
-    // assertion above passes on a kernel that computes something else.
-    assert!(
-        body.contains("mul.rn.f32"),
-        "fused_scale_mask_f32 lost its multiply:\n{body}"
+    assert_eq!(
+        body.matches("mul.rn.f32").count(),
+        1,
+        "fused_scale_mask_f32 declares exactly one multiply, `x * scale`:\n{body}"
     );
+    assert_eq!(
+        body.matches("add.rn.f32").count(),
+        2,
+        "fused_scale_mask_f32 declares two adds, `+ 0.0f` from affine_f32 and \
+         then the mask; a count of one means the zero add was folded away and \
+         a `-0.0` product now survives into the mask add:\n{body}"
+    );
+    // The zero must be the literal `affine_f32` carries, so the entry cannot
+    // pass the count above with an add of something else.
     assert!(
-        body.contains("add.rn.f32"),
-        "fused_scale_mask_f32 lost its mask add:\n{body}"
+        body.contains("0f00000000"),
+        "fused_scale_mask_f32 lost affine_f32's `+ 0.0f` operand:\n{body}"
     );
 }
 

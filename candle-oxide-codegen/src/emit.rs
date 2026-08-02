@@ -8,7 +8,7 @@ use dialect_mir::types::MirPtrType;
 use pliron::{
     basic_block::BasicBlock,
     builtin::{
-        attributes::{FPDoubleAttr, IntegerAttr},
+        attributes::{FPDoubleAttr, FPSingleAttr, IntegerAttr},
         op_interfaces::OperandSegmentInterface,
         types::{FP32Type, FP64Type, IntegerType, Signedness},
     },
@@ -109,6 +109,24 @@ pub fn const_u32(ctx: &mut Context, block: Ptr<BasicBlock>, value: u32) -> Value
 
 pub fn const_u64(ctx: &mut Context, block: Ptr<BasicBlock>, value: u64) -> Value {
     const_int(ctx, block, value, 64)
+}
+
+/// A 32-bit float constant, the width `affine.cu`'s `add` operand carries at
+/// f32 and so the width `FusedChain::ScaleMask` needs for its literal `0.0f`.
+pub fn const_f32(ctx: &mut Context, block: Ptr<BasicBlock>, value: f32) -> Value {
+    let f32_ty: TypeHandle = FP32Type::get(ctx).into();
+    let op = Operation::new(
+        ctx,
+        MirFloatConstantOp::get_concrete_op_info(),
+        vec![f32_ty],
+        vec![],
+        vec![],
+        0,
+    );
+    MirFloatConstantOp::new(op).set_attr_float_value(ctx, FPSingleAttr::from(value));
+    let res = op.deref(ctx).get_result(0);
+    op.insert_at_back(block, ctx);
+    res
 }
 
 /// A 64-bit float constant, the width `Body::Recip` needs for the literal

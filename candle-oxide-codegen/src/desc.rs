@@ -56,9 +56,14 @@ pub enum CmpKind {
 /// on the induction variable rather than a `num_dims`-deep walk.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FusedChain {
-    /// `out[i] = x[i] * scale + mask[(i / hss) * ss + (i % ss)]`, over
-    /// `x` of shape `[B, H, S, S]` and `mask` of shape `[B, 1, S, S]`,
+    /// `out[i] = (x[i] * scale + 0.0f) + mask[(i / hss) * ss + (i % ss)]`,
+    /// over `x` of shape `[B, H, S, S]` and `mask` of shape `[B, 1, S, S]`,
     /// with `hss = H*S*S` and `ss = S*S`.
+    ///
+    /// The `+ 0.0f` is `affine_f32`'s `add` operand, which Candle reaches
+    /// through `Tensor::affine(scale, 0.0)`. It changes one value: a product
+    /// of `-0.0` becomes `+0.0`. Omitting it disagrees with the reference
+    /// whenever the mask element is `-0.0` as well.
     ScaleMask,
     /// `t = x[i] + bias[i % d]; out[i] = t * normcdf(t)`.
     BiasGeluErf,

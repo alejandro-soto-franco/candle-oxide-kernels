@@ -95,7 +95,7 @@ pub const UNARY_ENTRIES: &[&str] = &[
 /// fused_scale_mask_f32(numel: size_t, hss: size_t, ss: size_t,
 ///                      x: *const f32, mask: *const f32, out: *mut f32,
 ///                      scale: f32)
-///     out[i] = x[i] * scale + mask[(i / hss) * ss + (i % ss)]
+///     out[i] = (x[i] * scale + 0.0f) + mask[(i / hss) * ss + (i % ss)]
 ///
 /// fused_bias_gelu_erf_f32(numel: size_t, d: size_t,
 ///                         x: *const f32, bias: *const f32, out: *mut f32)
@@ -111,6 +111,16 @@ pub const UNARY_ENTRIES: &[&str] = &[
 /// `fused_scale_mask_f32` reads `x` as `[B, H, S, S]` and `mask` as
 /// `[B, 1, S, S]`, with `hss = H*S*S` and `ss = S*S`. Every operand of every
 /// entry must be contiguous and f32.
+///
+/// `fused_scale_mask_f32` replaces `affine_f32` followed by `badd_f32`,
+/// and `affine_f32`'s body is
+/// `x * mul + add`, which Candle reaches with `add` zero through
+/// `Tensor::affine(scale, 0.0)`. That add changes one value: a product of
+/// `-0.0` becomes `+0.0`, since `-0.0 + 0.0` is `+0.0` under
+/// round-to-nearest. Dropping it disagrees with the reference whenever the
+/// mask element is `-0.0` as well. The three roundings are each kept
+/// separate: the family compiles with FMA contraction off, so the multiply
+/// and the zero add are never contracted.
 pub const FUSED_ENTRIES: &[&str] = &[
     "fused_scale_mask_f32",
     "fused_bias_gelu_erf_f32",

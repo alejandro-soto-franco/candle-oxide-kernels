@@ -10,13 +10,15 @@ This crate ships precompiled PTX for 49 entry points across three modules: `oxid
 
 | entry | computes |
 | --- | --- |
-| `fused_scale_mask_f32` | `out[i] = x[i] * scale + mask[(i / hss) * ss + (i % ss)]` |
+| `fused_scale_mask_f32` | `out[i] = (x[i] * scale + 0.0f) + mask[(i / hss) * ss + (i % ss)]` |
 | `fused_bias_gelu_erf_f32` | `t = x[i] + bias[i % d]; out[i] = t * normcdf(t)` |
 | `fused_bias_residual_f32` | `out[i] = (x[i] + bias[i % d]) + residual[i]` |
 
 Every operand must be contiguous and f32. There is no layout branching and no stride walk, which is what the contiguity precondition buys; a caller that cannot establish it evaluates the reference expression instead. `FUSED_ENTRIES` carries the full parameter list of each entry.
 
 This family compiles with FMA contraction off, where the elementwise families compile with it on to match nvcc's default. `fused_scale_mask_f32` replaces `affine_f32` followed by `badd_f32`, which rounds the product to memory before it adds the mask, so contracting the multiply and the add into one FMA would round once where the path being replaced rounds twice. The other two chains carry no contraction site.
+
+`fused_scale_mask_f32` carries a `+ 0.0f` because `affine_f32`'s body is `x * mul + add`, which Candle reaches with `add` zero through `Tensor::affine(scale, 0.0)`. That add changes one value: a product of `-0.0` becomes `+0.0`, since `-0.0 + 0.0` is `+0.0` under round-to-nearest. Omitting it would disagree with the reference whenever the mask element is `-0.0` as well. The entry therefore rounds three times, and the test suite pins the instruction counts so a fold enabled by a later `nsz` or relaxed floating-point flag surfaces as a failure rather than as numeric drift.
 
 ## Architecture
 
