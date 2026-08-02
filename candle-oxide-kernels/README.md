@@ -6,15 +6,19 @@ This crate ships precompiled PTX for 49 entry points across three modules: `oxid
 
 ## Fused chains
 
-`oxide::fused` holds three f32 entries, each collapsing a run of two elementwise kernels into one grid-stride pass:
+`oxide::fused` holds three f32 entries, each collapsing a run of two elementwise kernels into one pass. `row` below is the element offset of the block's row and `col` the column within it:
 
 | entry | computes |
 | --- | --- |
-| `fused_scale_mask_f32` | `out[i] = (x[i] * scale + 0.0f) + mask[(i / hss) * ss + (i % ss)]` |
-| `fused_bias_gelu_erf_f32` | `t = x[i] + bias[i % d]; out[i] = t * normcdf(t)` |
-| `fused_bias_residual_f32` | `out[i] = (x[i] + bias[i % d]) + residual[i]` |
+| `fused_scale_mask_f32` | `out[row + col] = (x[row + col] * scale + 0.0f) + mask[b * ss + col]` |
+| `fused_bias_gelu_erf_f32` | `t = x[row + col] + bias[col]; out[row + col] = t * normcdf(t)` |
+| `fused_bias_residual_f32` | `out[row + col] = (x[row + col] + bias[col]) + residual[row + col]` |
 
-Every operand must be contiguous and f32. There is no layout branching and no stride walk, which is what the contiguity precondition buys; a caller that cannot establish it evaluates the reference expression instead. `FUSED_ENTRIES` carries the full parameter list of each entry.
+Every operand must be contiguous and f32. There is no layout branching and no stride walk, which is what the contiguity precondition buys; a caller that cannot establish it evaluates the reference expression instead. `FUSED_ENTRIES` carries the full parameter list, the launch geometry and the index expression of each entry.
+
+The launch is shaped like the tensor rather than flat: `ctaid.x` walks the last dimension, and `ctaid.y` and `ctaid.z` carry the row. Every index term is then a special register or the induction variable, and no entry divides. A flat element counter would need `i / hss`, `i % ss` and `i % d` to recover a row and a column, and a division by a runtime value expands to roughly twenty instructions. That fixed per-element cost is what held the two chains moving eight bytes an element to 46 per cent of the measured 317 GB/s device ceiling while the one moving twelve reached 74. `fused_scale_mask_f32` reads the head count from `nctaid.y`, so it takes neither an element count nor `hss`.
+
+CUDA caps `gridDim.y` and `gridDim.z` at 65535, so a caller whose head count, batch size or row count exceeds that falls back. `ss` and `d` must be non-zero, as loop bounds.
 
 This family compiles with FMA contraction off, where the elementwise families compile with it on to match nvcc's default. `fused_scale_mask_f32` replaces `affine_f32` followed by `badd_f32`, which rounds the product to memory before it adds the mask, so contracting the multiply and the add into one FMA would round once where the path being replaced rounds twice. The other two chains carry no contraction site.
 

@@ -48,29 +48,37 @@ pub enum CmpKind {
 }
 
 /// One of the three fused chains, each replacing a run of two Candle
-/// elementwise kernels with a single grid-stride pass.
+/// elementwise kernels with a single pass.
 ///
 /// The variant fixes the parameter list and the arithmetic together, since
 /// for a fused entry the two are one choice. Every chain assumes contiguous
-/// operands, which is what lets the operand index be an explicit expression
-/// on the induction variable rather than a `num_dims`-deep walk.
+/// operands, which is what lets an operand index be an explicit expression
+/// rather than a `num_dims`-deep walk.
+///
+/// The launch is shaped like the tensor: `ctaid.x` walks the last dimension
+/// and the `y` and `z` dimensions carry the row, so every index term is a
+/// special register and no chain divides. See `fused.rs`. `row` below is the
+/// element offset of the block's row, and `col` the column within it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FusedChain {
-    /// `out[i] = (x[i] * scale + 0.0f) + mask[(i / hss) * ss + (i % ss)]`,
+    /// `out[row + col] = (x[row + col] * scale + 0.0f) + mask[b * ss + col]`,
     /// over `x` of shape `[B, H, S, S]` and `mask` of shape `[B, 1, S, S]`,
-    /// with `hss = H*S*S` and `ss = S*S`.
+    /// with `ss = S*S`, `b = ctaid.z` and `row = (b * nctaid.y + ctaid.y) * ss`.
+    ///
+    /// The head count arrives as `nctaid.y`, so the kernel takes no `hss`.
     ///
     /// The `+ 0.0f` is `affine_f32`'s `add` operand, which Candle reaches
     /// through `Tensor::affine(scale, 0.0)`. It changes one value: a product
     /// of `-0.0` becomes `+0.0`. Omitting it disagrees with the reference
     /// whenever the mask element is `-0.0` as well.
     ScaleMask,
-    /// `t = x[i] + bias[i % d]; out[i] = t * normcdf(t)`.
+    /// `t = x[row + col] + bias[col]; out[row + col] = t * normcdf(t)`, with
+    /// `row = ctaid.y * d`.
     BiasGeluErf,
-    /// `out[i] = (x[i] + bias[i % d]) + residual[i]`. The parenthesisation
-    /// is the order Candle evaluates, `Linear::forward` adding the bias
-    /// before the caller adds the residual, and reassociating changes the
-    /// result.
+    /// `out[row + col] = (x[row + col] + bias[col]) + residual[row + col]`,
+    /// with `row = ctaid.y * d`. The parenthesisation is the order Candle
+    /// evaluates, `Linear::forward` adding the bias before the caller adds
+    /// the residual, and reassociating changes the result.
     BiasResidual,
 }
 

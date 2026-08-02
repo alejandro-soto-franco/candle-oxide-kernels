@@ -92,25 +92,40 @@ pub const UNARY_ENTRIES: &[&str] = &[
 /// the word-sized parameters stay contiguous:
 ///
 /// ```text
-/// fused_scale_mask_f32(numel: size_t, hss: size_t, ss: size_t,
-///                      x: *const f32, mask: *const f32, out: *mut f32,
-///                      scale: f32)
-///     out[i] = (x[i] * scale + 0.0f) + mask[(i / hss) * ss + (i % ss)]
+/// fused_scale_mask_f32(ss: size_t, x: *const f32, mask: *const f32,
+///                      out: *mut f32, scale: f32)
+///     grid (ceil(ss / block), H, B), block (256, 1, 1)
+///     b   = ctaid.z
+///     row = (b * nctaid.y + ctaid.y) * ss
+///     col = ctaid.x * ntid.x + tid.x, strided by ntid.x * nctaid.x
+///                                     while col < ss
+///     out[row + col] = (x[row + col] * scale + 0.0f) + mask[b * ss + col]
 ///
-/// fused_bias_gelu_erf_f32(numel: size_t, d: size_t,
-///                         x: *const f32, bias: *const f32, out: *mut f32)
-///     t = x[i] + bias[i % d]
-///     out[i] = t * normcdf(t)
+/// fused_bias_gelu_erf_f32(d: size_t, x: *const f32, bias: *const f32,
+///                         out: *mut f32)
+///     grid (ceil(d / block), rows, 1), block (256, 1, 1)
+///     row = ctaid.y * d
+///     col = ctaid.x * ntid.x + tid.x, strided while col < d
+///     t   = x[row + col] + bias[col]
+///     out[row + col] = t * normcdf(t)
 ///
-/// fused_bias_residual_f32(numel: size_t, d: size_t,
-///                         x: *const f32, bias: *const f32,
+/// fused_bias_residual_f32(d: size_t, x: *const f32, bias: *const f32,
 ///                         residual: *const f32, out: *mut f32)
-///     out[i] = (x[i] + bias[i % d]) + residual[i]
+///     same geometry
+///     out[row + col] = (x[row + col] + bias[col]) + residual[row + col]
 /// ```
 ///
 /// `fused_scale_mask_f32` reads `x` as `[B, H, S, S]` and `mask` as
-/// `[B, 1, S, S]`, with `hss = H*S*S` and `ss = S*S`. Every operand of every
-/// entry must be contiguous and f32.
+/// `[B, 1, S, S]`, with `ss = S*S`. The head count arrives as `nctaid.y`
+/// rather than as a parameter. `rows` for the other two is every dimension
+/// but the last. Every operand of every entry must be contiguous and f32.
+///
+/// No entry takes an element count, and none divides: the launch is shaped
+/// like the tensor, so every index term is a special register or the
+/// induction variable. CUDA caps `gridDim.y` and `gridDim.z` at 65535, so a
+/// caller whose `H`, `B` or `rows` exceeds that evaluates the reference
+/// expression instead. `ss` and `d` must be non-zero, now as loop bounds
+/// rather than as divisors.
 ///
 /// `fused_scale_mask_f32` replaces `affine_f32` followed by `badd_f32`,
 /// and `affine_f32`'s body is

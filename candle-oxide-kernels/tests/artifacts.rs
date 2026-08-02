@@ -122,6 +122,26 @@ fn the_shipped_scale_mask_entry_rounds_where_the_reference_rounds() {
     );
 }
 
+/// The division gate, applied to the bytes this crate actually ships.
+///
+/// Every fused entry takes its row from the grid, so no index term is
+/// recovered from a flat element counter and no entry divides. A division
+/// against a runtime value expands to roughly twenty instructions, which is
+/// a fixed per-element cost these kernels exist to avoid.
+#[test]
+fn no_shipped_fused_entry_divides() {
+    for name in k::FUSED_ENTRIES {
+        let body = entry_body(k::FUSED, name);
+        for divide in ["div.u32", "rem.u32", "div.u64", "rem.u64"] {
+            assert_eq!(
+                body.matches(divide).count(),
+                0,
+                "{name} ships a {divide}:\n{body}"
+            );
+        }
+    }
+}
+
 /// Routing is asserted by content rather than by identity: two `&'static
 /// str` consts holding the same literal can share one allocation, so a
 /// pointer comparison would pass on a `ptx_for` that returned the wrong

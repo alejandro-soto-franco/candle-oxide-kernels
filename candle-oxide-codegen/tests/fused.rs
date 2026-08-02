@@ -57,13 +57,11 @@ fn the_family_holds_exactly_the_three_chains() {
 }
 
 #[test]
-fn scale_mask_declares_seven_words_with_scale_last() {
+fn scale_mask_declares_five_words_with_scale_last() {
     let ptx = fused_ptx();
     assert_eq!(
         param_shapes(&ptx, "fused_scale_mask_f32"),
         vec![
-            WORD,          // numel
-            WORD,          // hss
             WORD,          // ss
             PTR,           // x
             PTR,           // mask
@@ -75,12 +73,11 @@ fn scale_mask_declares_seven_words_with_scale_last() {
 }
 
 #[test]
-fn bias_gelu_erf_declares_five_words() {
+fn bias_gelu_erf_declares_four_words() {
     let ptx = fused_ptx();
     assert_eq!(
         param_shapes(&ptx, "fused_bias_gelu_erf_f32"),
         vec![
-            WORD, // numel
             WORD, // d
             PTR,  // x
             PTR,  // bias
@@ -91,12 +88,11 @@ fn bias_gelu_erf_declares_five_words() {
 }
 
 #[test]
-fn bias_residual_declares_six_words() {
+fn bias_residual_declares_five_words() {
     let ptx = fused_ptx();
     assert_eq!(
         param_shapes(&ptx, "fused_bias_residual_f32"),
         vec![
-            WORD, // numel
             WORD, // d
             PTR,  // x
             PTR,  // bias
@@ -105,6 +101,67 @@ fn bias_residual_declares_six_words() {
         ],
         "fused_bias_residual_f32 ABI:\n{ptx}"
     );
+}
+
+/// The division gate.
+///
+/// The launch is shaped like the tensor so that every index term comes from
+/// a special register. Recovering a row and a column from a flat counter
+/// instead needs `i / hss`, `i % ss` and `i % d`, and a division by a
+/// runtime value expands to roughly twenty instructions, which is what held
+/// the two chains moving eight bytes an element to 46 per cent of the device
+/// bandwidth ceiling while the one moving twelve reached 74. An index
+/// expression that reintroduces a division gives that back silently, so it
+/// fails here instead.
+#[test]
+fn no_fused_entry_divides() {
+    let ptx = fused_ptx();
+    for name in [
+        "fused_scale_mask_f32",
+        "fused_bias_gelu_erf_f32",
+        "fused_bias_residual_f32",
+    ] {
+        let body = entry_body(&ptx, name);
+        for divide in ["div.u32", "rem.u32", "div.u64", "rem.u64"] {
+            assert_eq!(
+                body.matches(divide).count(),
+                0,
+                "{name} carries a {divide}; the grid is shaped like the tensor \
+                 so no index term needs one:\n{body}"
+            );
+        }
+    }
+}
+
+/// The grid coordinates each chain reads, which is the other half of the
+/// division gate: an entry could drop its divisions by taking the row as a
+/// parameter again, and this pins that the row comes from the launch.
+#[test]
+fn each_chain_reads_the_grid_coordinates_its_geometry_names() {
+    let ptx = fused_ptx();
+
+    // `(ceil(ss / block), H, B)`: the batch index is `ctaid.z` and the head
+    // count is `nctaid.y`, which is what replaced the `hss` parameter.
+    let scale_mask = entry_body(&ptx, "fused_scale_mask_f32");
+    for sreg in ["%ctaid.x", "%ctaid.y", "%ctaid.z", "%nctaid.y"] {
+        assert!(
+            scale_mask.contains(sreg),
+            "fused_scale_mask_f32 does not read {sreg}:\n{scale_mask}"
+        );
+    }
+
+    // `(ceil(d / block), rows, 1)`: one row per `ctaid.y`, and the z
+    // dimension is unused, so reading it would mean the geometry drifted.
+    for name in ["fused_bias_gelu_erf_f32", "fused_bias_residual_f32"] {
+        let body = entry_body(&ptx, name);
+        for sreg in ["%ctaid.x", "%ctaid.y"] {
+            assert!(body.contains(sreg), "{name} does not read {sreg}:\n{body}");
+        }
+        assert!(
+            !body.contains("%ctaid.z"),
+            "{name} reads %ctaid.z, but its grid is one deep:\n{body}"
+        );
+    }
 }
 
 /// libdevice is linked and its bodies are inlined, so the symbol survives
