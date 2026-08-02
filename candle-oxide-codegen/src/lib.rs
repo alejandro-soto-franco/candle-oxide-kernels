@@ -45,15 +45,16 @@ pub fn build_family(family: Family, ops: &[OpDesc], target: &str) -> Result<Stri
         }
     }
 
-    let needs_libdevice = ops.iter().any(|op| op.libdevice_name().is_some());
+    let needs_libdevice = ops.iter().any(|op| !op.libdevice_symbols().is_empty());
     let compiler = Compiler::discover().expect("LLVM 21+ llc and opt are installed");
     let options = CompileOptions::new(Target::parse(target).expect("valid target"))
         .with_fma_contraction(family.fma_contraction())
         .with_linking(if needs_libdevice {
             Linking::Libdevice
         } else {
-            // Reached by a fused set that leaves `fused_bias_gelu_erf_f32`
-            // out, the only fused entry naming a symbol. The two elementwise
+            // Reached by a fused set holding neither
+            // `fused_bias_gelu_erf_f32` nor `fused_scale_mask_softmax_f32`,
+            // the only fused entries naming a symbol. The two elementwise
             // families always carry one (`bmaximum`/`bminimum` in binary;
             // `uexp`, `ulog`, `usin`, `ucos`, `usqrt` in unary), so a
             // `binary_ops()` or `unary_ops()` set never lands here.

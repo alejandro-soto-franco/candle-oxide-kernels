@@ -2,11 +2,11 @@
 
 Elementwise CUDA kernels for Candle, generated as PTX by cuda-oxide.
 
-This crate ships precompiled PTX for 51 entry points across three modules: `oxide::binary` (24 kernels for binary operations), `oxide::unary` (22 kernels for unary operations) and `oxide::fused` (5 entries whose index comes from the launch geometry). The PTX is generated offline and committed, so this crate carries no build dependencies and requires no nightly toolchain.
+This crate ships precompiled PTX for 52 entry points across three modules: `oxide::binary` (24 kernels for binary operations), `oxide::unary` (22 kernels for unary operations) and `oxide::fused` (6 entries whose index comes from the launch geometry). The PTX is generated offline and committed, so this crate carries no build dependencies and requires no nightly toolchain.
 
 ## The fused family
 
-What `oxide::fused`'s entries share is that each takes its index from the launch geometry rather than computing it. Three also collapse a run of two elementwise kernels into one pass; the other two are a single traversal Candle already performs, run without an index computation. `row` below is the element offset of the block's row and `col` the column within it:
+What `oxide::fused`'s entries share is that each takes its index from the launch geometry rather than computing it. Four also collapse a run of Candle kernels into one pass; the other two are a single traversal Candle already performs, run without an index computation. `row` below is the element offset of the block's row and `col` the column within it:
 
 | entry | computes |
 | --- | --- |
@@ -15,6 +15,7 @@ What `oxide::fused`'s entries share is that each takes its index from the launch
 | `fused_bias_residual_f32` | `out[row + col] = (x[row + col] + bias[col]) + residual[row + col]` |
 | `fused_bias_f32` | `out[row + col] = x[row + col] + bias[col]` |
 | `fused_permute12_f32` | `out[((b * D2 + j) * D1 + i) * d + k] = src[((b * D1 + i) * D2 + j) * d + k]` |
+| `fused_scale_mask_softmax_f32` | softmax over `t(col) = (scores[row + col] * scale + 0.0f) + mask[mrow + col]` |
 
 Every operand must be contiguous and f32. There is no layout branching and no stride walk, which is what the contiguity precondition buys; a caller that cannot establish it evaluates the reference expression instead. `FUSED_ENTRIES` carries the full parameter list, the launch geometry and the index expression of each entry.
 
@@ -22,9 +23,11 @@ The launch is shaped like the tensor rather than flat: `ctaid.x` walks the last 
 
 `fused_permute12_f32` copies a rank-4 tensor whose logical shape is `[B, D2, D1, d]` over a contiguous source of shape `[B, D1, D2, d]`, and `fused_bias_f32` is the last-dimension broadcast add. Both displace a kernel Candle routes through `get_strided_index`, which walks `num_dims` deep, in the copy's case because the layout is permuted and in the add's because a broadcast carries a zero stride. `fused_permute12_f32` takes its column from `tid.x` alone, stepping by `ntid.x`, since `ctaid.x` names a permuted dimension and cannot also index the column.
 
+`fused_scale_mask_softmax_f32` folds Candle's softmax onto the scale and the mask, so the score tensor is never written between the two. Its block must be exactly one warp. The reduction is `softmax_f32`'s own butterfly over the lanes 16, 8, 4, 2 and 1, reproduced term for term, which needs no shared memory and no barrier, and `1. / tmp` folds to one correctly rounded single-precision reciprocal, which is what nvcc emits at the corresponding point. This is the one entry whose result depends on the order of a floating-point reduction, so the shuffle sequence is part of its interface and the test suite pins it. The column count is the grid's own x extent, so the entry takes no word-sized parameter at all; `out` is written twice and may not alias either input.
+
 CUDA caps `gridDim.y` and `gridDim.z` at 65535, so a caller whose head count, batch size, `D1` or row count exceeds that falls back. `ss` and `d` must be non-zero, as loop bounds.
 
-This family compiles with FMA contraction off, where the elementwise families compile with it on to match nvcc's default. `fused_scale_mask_f32` replaces `affine_f32` followed by `badd_f32`, which rounds the product to memory before it adds the mask, so contracting the multiply and the add into one FMA would round once where the path being replaced rounds twice. The other four entries carry no contraction site.
+This family compiles with FMA contraction off, where the elementwise families compile with it on to match nvcc's default. `fused_scale_mask_f32` replaces `affine_f32` followed by `badd_f32`, which rounds the product to memory before it adds the mask, so contracting the multiply and the add into one FMA would round once where the path being replaced rounds twice. `fused_scale_mask_softmax_f32` carries the same site twice over, since it recomputes the scaled and masked value in each of its two reading passes. The other four entries carry no contraction site.
 
 `fused_scale_mask_f32` carries a `+ 0.0f` because `affine_f32`'s body is `x * mul + add`, which Candle reaches with `add` zero through `Tensor::affine(scale, 0.0)`. That add changes one value: a product of `-0.0` becomes `+0.0`, since `-0.0 + 0.0` is `+0.0` under round-to-nearest. Omitting it would disagree with the reference whenever the mask element is `-0.0` as well. The entry therefore rounds three times, and the test suite pins the instruction counts so a fold enabled by a later `nsz` or relaxed floating-point flag surfaces as a failure rather than as numeric drift.
 
@@ -38,12 +41,13 @@ Every pointer parameter carries a `.ptr .global .align 1` annotation, the most c
 
 ## Verification
 
-The figures below cover the 46 elementwise entries. The five fused entries have no nvcc
+The figures below cover the 46 elementwise entries. The six fused entries have no nvcc
 counterpart to diff against, so their host-side checks are the declared ABI, the libdevice
-symbol the GELU entry resolves to, the absence of a contracted multiply-add in
+symbols each resolves to, the absence of a contracted multiply-add in
 `fused_scale_mask_f32`, the absence of any division in any of them, the grid coordinates
-each reads, and `ptxas` acceptance at the shipped baseline and at `sm_120`. Numeric parity
-for those five runs on a GPU, in the consuming Candle checkout.
+each reads, the butterfly order and the reciprocal form in
+`fused_scale_mask_softmax_f32`, and `ptxas` acceptance at the shipped baseline and at
+`sm_120`. Numeric parity for those six runs on a GPU, in the consuming Candle checkout.
 
 These kernels are bit-exact against Candle's own nvcc-built kernels. The parity suite in the
 consuming Candle checkout runs 63 cases at difference exactly 0.0, with no tolerance, covering

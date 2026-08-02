@@ -40,26 +40,32 @@
 //! behind. Only the column stays 32-bit, matching the induction variable of
 //! Candle's own elementwise kernels.
 
-use crate::body::call;
+use crate::body::{call, fp_cast};
 use crate::desc::{FusedKind, OpDesc};
 use crate::emit::{
-    cond_br, const_f32, const_u64, emit, goto, module_block, new_block, widen_u32_to_u64, Tys,
+    cond_br, const_f32, const_f64, const_u32, const_u64, emit, goto, module_block, new_block,
+    widen_u32_to_u64, Tys,
 };
 use cuda_oxide_codegen::experimental::CodegenModule;
 use dialect_mir::ops::{
-    MirAddOp, MirFuncOp, MirLoadOp, MirLtOp, MirMulOp, MirPtrOffsetOp, MirReturnOp, MirStoreOp,
+    MirAddOp, MirDivOp, MirFuncOp, MirLoadOp, MirLtOp, MirMulOp, MirPtrOffsetOp, MirReturnOp,
+    MirStoreOp, MirSubOp,
 };
 use dialect_nvvm::ops::{
     ReadPtxSregCtaidXOp, ReadPtxSregCtaidYOp, ReadPtxSregCtaidZOp, ReadPtxSregNctaidXOp,
-    ReadPtxSregNctaidYOp, ReadPtxSregNtidXOp, ReadPtxSregTidXOp,
+    ReadPtxSregNctaidYOp, ReadPtxSregNtidXOp, ReadPtxSregTidXOp, ShflSyncBflyF32Op,
 };
 use pliron::{
     basic_block::BasicBlock,
-    builtin::{attributes::TypeAttr, op_interfaces::SymbolOpInterface, types::FunctionType},
+    builtin::{
+        attributes::TypeAttr, op_interfaces::SymbolOpInterface, types::FP64Type,
+        types::FunctionType,
+    },
     context::{Context, Ptr},
     op::Op,
     operation::Operation,
     r#type::TypeHandle,
+    region::Region,
     value::Value,
 };
 
@@ -98,6 +104,14 @@ fn params(tys: &Tys, kind: FusedKind) -> Vec<TypeHandle> {
             tys.in_ptr,  // src
             tys.out_ptr, // out
         ],
+        // The column count is `S`, which is the grid's x extent, so this
+        // kind takes no word-sized parameter at all.
+        FusedKind::ScaleMaskSoftmax => vec![
+            tys.in_ptr,  // scores
+            tys.in_ptr,  // mask
+            tys.out_ptr, // out
+            tys.f,       // scale
+        ],
     }
 }
 
@@ -106,7 +120,7 @@ fn out_position(kind: FusedKind) -> usize {
     match kind {
         FusedKind::ScaleMask | FusedKind::BiasGeluErf | FusedKind::Bias => 3,
         FusedKind::BiasResidual => 4,
-        FusedKind::Permute12 => 2,
+        FusedKind::Permute12 | FusedKind::ScaleMaskSoftmax => 2,
     }
 }
 
@@ -356,6 +370,11 @@ fn emit_launch(
                 broadcast: None,
             }
         }
+        // `emit_softmax` builds its own control flow and never asks for a
+        // single-loop launch, so `build_fused` branches away before here.
+        FusedKind::ScaleMaskSoftmax => {
+            unreachable!("the softmax fold lays out its own passes")
+        }
     }
 }
 
@@ -394,6 +413,16 @@ pub fn build_fused(module: &mut CodegenModule, op: &OpDesc) {
             let b = entry.deref(ctx);
             (0..arity).map(|index| b.get_argument(index)).collect()
         };
+
+        // Every other kind is one traversal, so one loop carries it. The
+        // softmax fold is three passes over the row with a warp reduction
+        // between each, so it builds its own control flow.
+        if kind == FusedKind::ScaleMaskSoftmax {
+            emit_softmax(ctx, region, entry, &tys, &args);
+            func.get_operation().insert_at_back(module_block, ctx);
+            return;
+        }
+
         let out = args[out_position(kind)];
 
         let launch = emit_launch(ctx, entry, &tys, &args, kind);
@@ -481,6 +510,456 @@ pub fn build_fused(module: &mut CodegenModule, op: &OpDesc) {
         func.get_operation().insert_at_back(module_block, ctx);
     });
     module.mark_kernel_entry(&op.name).unwrap();
+}
+
+/// The warp Candle's softmax reduces over. `reduce.cu` launches block
+/// `(1, 32, 1)` and this launches `(32, 1, 1)`, so both give a linear thread
+/// id equal to the lane and the butterfly sees the same partners.
+const WARP: u32 = 32;
+
+/// The lanes Candle's butterfly exchanges with, in order
+/// (`reduce.cu:246-249` and `:265-268`).
+const BUTTERFLY: [u32; 5] = [16, 8, 4, 2, 1];
+
+/// How a warp reduction folds a lane's value into the accumulator.
+#[derive(Clone, Copy)]
+enum Combine {
+    /// `maxg(acc, partner)`, which is `fmaxf` at f32.
+    Max,
+    /// `acc += partner`.
+    Add,
+}
+
+/// One butterfly exchange with the lane `delta` bits away, over the full
+/// warp.
+fn shfl_bfly(
+    ctx: &mut Context,
+    block: Ptr<BasicBlock>,
+    member_mask: Value,
+    value: Value,
+    delta: u32,
+) -> Value {
+    let lane = const_u32(ctx, block, delta);
+    let op = ShflSyncBflyF32Op::build(ctx, member_mask, value, lane);
+    let res = op.deref(ctx).get_result(0);
+    op.insert_at_back(block, ctx);
+    res
+}
+
+/// Candle's warp-wide reduction: five butterfly exchanges over lanes 16, 8,
+/// 4, 2 and 1, folding each partner into the accumulator as it arrives.
+///
+/// The order is the result. A tree of a different shape, or the same shape
+/// with the operands the other way round, reduces the same numbers to a
+/// different float, so this is written out rather than rolled into a loop
+/// the optimiser might reassociate.
+fn emit_warp_reduce(
+    ctx: &mut Context,
+    block: Ptr<BasicBlock>,
+    tys: &Tys,
+    member_mask: Value,
+    seed: Value,
+    combine: Combine,
+) -> Value {
+    let mut acc = seed;
+    for delta in BUTTERFLY {
+        let partner = shfl_bfly(ctx, block, member_mask, acc, delta);
+        acc = match combine {
+            Combine::Max => call(ctx, block, "__nv_fmaxf", tys.f, vec![acc, partner]),
+            Combine::Add => emit(
+                ctx,
+                block,
+                MirAddOp::get_concrete_op_info(),
+                vec![tys.f],
+                vec![acc, partner],
+            )
+            .unwrap(),
+        };
+    }
+    acc
+}
+
+/// `(scores[row + col] * scale + 0.0f) + mask[mrow + col]`, the value
+/// `fused_scale_mask_f32` would have written and `softmax_f32` would have
+/// read straight back.
+///
+/// Returns the value and the score index, which the exponential pass stores
+/// through as well.
+#[allow(clippy::too_many_arguments)]
+fn emit_scale_mask_value(
+    ctx: &mut Context,
+    block: Ptr<BasicBlock>,
+    tys: &Tys,
+    args: &[Value],
+    row: Value,
+    mrow: Value,
+    col: Value,
+) -> (Value, Value) {
+    let (scores, mask, scale) = (args[0], args[1], args[3]);
+    let index = index_op(ctx, block, tys, MirAddOp::get_concrete_op_info(), row, col);
+    let mask_index = index_op(ctx, block, tys, MirAddOp::get_concrete_op_info(), mrow, col);
+    let xv = load_in(ctx, block, tys, scores, index);
+    let mv = load_in(ctx, block, tys, mask, mask_index);
+    let scaled = emit(
+        ctx,
+        block,
+        MirMulOp::get_concrete_op_info(),
+        vec![tys.f],
+        vec![xv, scale],
+    )
+    .unwrap();
+    // `affine_f32`'s `add` operand, kept for the reason round one added it:
+    // it turns a `-0.0` product into `+0.0`.
+    let zero = const_f32(ctx, block, 0.0);
+    let affine = emit(
+        ctx,
+        block,
+        MirAddOp::get_concrete_op_info(),
+        vec![tys.f],
+        vec![scaled, zero],
+    )
+    .unwrap();
+    let value = emit(
+        ctx,
+        block,
+        MirAddOp::get_concrete_op_info(),
+        vec![tys.f],
+        vec![affine, mv],
+    )
+    .unwrap();
+    (value, index)
+}
+
+/// Candle's softmax over the scaled and masked scores, in place of the
+/// `fused_scale_mask_f32` write and the `softmax_f32` read that followed it.
+///
+/// Three passes over the row, each a grid-stride walk from `tid.x` by one
+/// warp, with a warp reduction between them:
+///
+/// 1. the maximum of `t(col)`, reduced across the warp;
+/// 2. `exp(t(col) - max)`, stored, and summed across the warp;
+/// 3. every stored element scaled by the reciprocal of that sum.
+///
+/// `t(col)` is recomputed in the first two rather than kept, which is the
+/// whole point: keeping it is the round trip through memory this removes.
+///
+/// The stride is the literal [`WARP`] rather than `ntid.x`. The block is one
+/// warp and the caller enforces it, so 32 is the true constant, and reading
+/// it from the launch would leave the trip count as a runtime division.
+/// Candle's own softmax carries three `div.u32` for exactly that reason.
+fn emit_softmax(
+    ctx: &mut Context,
+    region: Ptr<Region>,
+    entry: Ptr<BasicBlock>,
+    tys: &Tys,
+    args: &[Value],
+) {
+    let out = args[2];
+
+    let tid = sreg(ctx, entry, tys, ReadPtxSregTidXOp::get_concrete_op_info());
+    let s = sreg(ctx, entry, tys, ReadPtxSregCtaidXOp::get_concrete_op_info());
+    let h = sreg(ctx, entry, tys, ReadPtxSregCtaidYOp::get_concrete_op_info());
+    let b = sreg(ctx, entry, tys, ReadPtxSregCtaidZOp::get_concrete_op_info());
+    let s_extent = sreg(
+        ctx,
+        entry,
+        tys,
+        ReadPtxSregNctaidXOp::get_concrete_op_info(),
+    );
+    let h_extent = sreg(
+        ctx,
+        entry,
+        tys,
+        ReadPtxSregNctaidYOp::get_concrete_op_info(),
+    );
+
+    // `ncols` is `S`, the grid's own x extent.
+    let ncols = s_extent;
+    let step = const_u32(ctx, entry, WARP);
+    let member_mask = const_u32(ctx, entry, u32::MAX);
+
+    let b64 = widen_u32_to_u64(ctx, entry, b);
+    let h64 = widen_u32_to_u64(ctx, entry, h);
+    let s64 = widen_u32_to_u64(ctx, entry, s);
+    let s_extent64 = widen_u32_to_u64(ctx, entry, s_extent);
+    let h_extent64 = widen_u32_to_u64(ctx, entry, h_extent);
+
+    // `row = ((b * H + h) * S + s) * S`, the score row this block owns.
+    let bh = row_base(ctx, entry, tys, b64, h_extent64, h64);
+    let bhs = row_base(ctx, entry, tys, bh, s_extent64, s64);
+    let row = index_op(
+        ctx,
+        entry,
+        tys,
+        MirMulOp::get_concrete_op_info(),
+        bhs,
+        s_extent64,
+    );
+    // `mrow = (b * S + s) * S`. The mask is `[B, 1, S, S]`, so every head of
+    // one batch element reads the same row of it.
+    let bs = row_base(ctx, entry, tys, b64, s_extent64, s64);
+    let mrow = index_op(
+        ctx,
+        entry,
+        tys,
+        MirMulOp::get_concrete_op_info(),
+        bs,
+        s_extent64,
+    );
+
+    let max_header = new_block(ctx, region, vec![tys.i32, tys.f]);
+    let max_body = new_block(ctx, region, vec![tys.i32, tys.f]);
+    let max_done = new_block(ctx, region, vec![tys.f]);
+    let sum_header = new_block(ctx, region, vec![tys.i32, tys.f]);
+    let sum_body = new_block(ctx, region, vec![tys.i32, tys.f]);
+    let sum_done = new_block(ctx, region, vec![tys.f]);
+    let scale_header = new_block(ctx, region, vec![tys.i32]);
+    let scale_body = new_block(ctx, region, vec![tys.i32]);
+    let exit = new_block(ctx, region, vec![]);
+
+    // Pass one: `max_val = -INFINITY`, then the maximum over this lane's
+    // columns. A lane past the end contributes `-INFINITY`, which is the
+    // identity, so a column count that is not a multiple of the warp needs
+    // no special case.
+    let neg_inf = const_f32(ctx, entry, f32::NEG_INFINITY);
+    goto(ctx, entry, max_header, vec![tid, neg_inf]);
+
+    let (max_col, max_acc) = {
+        let blk = max_header.deref(ctx);
+        (blk.get_argument(0), blk.get_argument(1))
+    };
+    let more = emit(
+        ctx,
+        max_header,
+        MirLtOp::get_concrete_op_info(),
+        vec![tys.i1],
+        vec![max_col, ncols],
+    )
+    .unwrap();
+    cond_br(
+        ctx,
+        max_header,
+        more,
+        max_body,
+        vec![max_col, max_acc],
+        max_done,
+        vec![max_acc],
+    );
+
+    let (col, acc) = {
+        let blk = max_body.deref(ctx);
+        (blk.get_argument(0), blk.get_argument(1))
+    };
+    let col64 = widen_u32_to_u64(ctx, max_body, col);
+    let (t, _) = emit_scale_mask_value(ctx, max_body, tys, args, row, mrow, col64);
+    let folded = call(ctx, max_body, "__nv_fmaxf", tys.f, vec![acc, t]);
+    let next = emit(
+        ctx,
+        max_body,
+        MirAddOp::get_concrete_op_info(),
+        vec![tys.i32],
+        vec![col, step],
+    )
+    .unwrap();
+    goto(ctx, max_body, max_header, vec![next, folded]);
+
+    let lane_max = max_done.deref(ctx).get_argument(0);
+    let max_val = emit_warp_reduce(ctx, max_done, tys, member_mask, lane_max, Combine::Max);
+
+    // Pass two: `exp(t - max_val)`, stored and accumulated. A lane past the
+    // end contributes `0.0f`, the identity for the sum.
+    let zero = const_f32(ctx, max_done, 0.0);
+    goto(ctx, max_done, sum_header, vec![tid, zero]);
+
+    let (sum_col, sum_acc) = {
+        let blk = sum_header.deref(ctx);
+        (blk.get_argument(0), blk.get_argument(1))
+    };
+    let more = emit(
+        ctx,
+        sum_header,
+        MirLtOp::get_concrete_op_info(),
+        vec![tys.i1],
+        vec![sum_col, ncols],
+    )
+    .unwrap();
+    cond_br(
+        ctx,
+        sum_header,
+        more,
+        sum_body,
+        vec![sum_col, sum_acc],
+        sum_done,
+        vec![sum_acc],
+    );
+
+    let (col, acc) = {
+        let blk = sum_body.deref(ctx);
+        (blk.get_argument(0), blk.get_argument(1))
+    };
+    let col64 = widen_u32_to_u64(ctx, sum_body, col);
+    let (t, index) = emit_scale_mask_value(ctx, sum_body, tys, args, row, mrow, col64);
+    let shifted = emit(
+        ctx,
+        sum_body,
+        MirSubOp::get_concrete_op_info(),
+        vec![tys.f],
+        vec![t, max_val],
+    )
+    .unwrap();
+    let val = call(ctx, sum_body, "__nv_expf", tys.f, vec![shifted]);
+    let running = emit(
+        ctx,
+        sum_body,
+        MirAddOp::get_concrete_op_info(),
+        vec![tys.f],
+        vec![acc, val],
+    )
+    .unwrap();
+    store_out(ctx, sum_body, tys, out, index, val);
+    let next = emit(
+        ctx,
+        sum_body,
+        MirAddOp::get_concrete_op_info(),
+        vec![tys.i32],
+        vec![col, step],
+    )
+    .unwrap();
+    goto(ctx, sum_body, sum_header, vec![next, running]);
+
+    let lane_sum = sum_done.deref(ctx).get_argument(0);
+    let total = emit_warp_reduce(ctx, sum_done, tys, member_mask, lane_sum, Combine::Add);
+
+    // `const ACC inv_tmp = 1. / tmp`, with `ACC` a float and `1.` a double,
+    // so the divide widens and the quotient narrows back. Both nvcc and this
+    // pipeline fold that to one correctly rounded single-precision
+    // reciprocal, which is the same number: a double quotient carries more
+    // than twice the significand of a float, so rounding it twice lands
+    // where rounding once would. `urecip_f32` takes the same shape and
+    // lowers the same way.
+    let inv_total = emit_double_reciprocal(ctx, sum_done, tys, total);
+    goto(ctx, sum_done, scale_header, vec![tid]);
+
+    // Pass three: scale every element this lane stored.
+    let scale_col = scale_header.deref(ctx).get_argument(0);
+    let more = emit(
+        ctx,
+        scale_header,
+        MirLtOp::get_concrete_op_info(),
+        vec![tys.i1],
+        vec![scale_col, ncols],
+    )
+    .unwrap();
+    cond_br(
+        ctx,
+        scale_header,
+        more,
+        scale_body,
+        vec![scale_col],
+        exit,
+        vec![],
+    );
+
+    let col = scale_body.deref(ctx).get_argument(0);
+    let col64 = widen_u32_to_u64(ctx, scale_body, col);
+    let index = index_op(
+        ctx,
+        scale_body,
+        tys,
+        MirAddOp::get_concrete_op_info(),
+        row,
+        col64,
+    );
+    let stored = load_out(ctx, scale_body, tys, out, index);
+    let scaled = emit(
+        ctx,
+        scale_body,
+        MirMulOp::get_concrete_op_info(),
+        vec![tys.f],
+        vec![stored, inv_total],
+    )
+    .unwrap();
+    store_out(ctx, scale_body, tys, out, index, scaled);
+    let next = emit(
+        ctx,
+        scale_body,
+        MirAddOp::get_concrete_op_info(),
+        vec![tys.i32],
+        vec![col, step],
+    )
+    .unwrap();
+    goto(ctx, scale_body, scale_header, vec![next]);
+
+    emit(
+        ctx,
+        exit,
+        MirReturnOp::get_concrete_op_info(),
+        vec![],
+        vec![],
+    );
+}
+
+/// `(float)(1.0 / (double)x)`, the shape `1. / tmp` takes when the
+/// accumulator is a float and the literal is a double.
+fn emit_double_reciprocal(ctx: &mut Context, block: Ptr<BasicBlock>, tys: &Tys, x: Value) -> Value {
+    let f64_ty: TypeHandle = FP64Type::get(ctx).into();
+    let one = const_f64(ctx, block, 1.0);
+    let wide = fp_cast(ctx, block, x, f64_ty);
+    let quotient = emit(
+        ctx,
+        block,
+        MirDivOp::get_concrete_op_info(),
+        vec![f64_ty],
+        vec![one, wide],
+    )
+    .unwrap();
+    fp_cast(ctx, block, quotient, tys.f)
+}
+
+/// `out[off] = value`.
+fn store_out(
+    ctx: &mut Context,
+    block: Ptr<BasicBlock>,
+    tys: &Tys,
+    out: Value,
+    off: Value,
+    value: Value,
+) {
+    let p = emit(
+        ctx,
+        block,
+        MirPtrOffsetOp::get_concrete_op_info(),
+        vec![tys.out_ptr],
+        vec![out, off],
+    )
+    .unwrap();
+    emit(
+        ctx,
+        block,
+        MirStoreOp::get_concrete_op_info(),
+        vec![],
+        vec![p, value],
+    );
+}
+
+/// `out[off]`, one element read back through the output pointer.
+fn load_out(ctx: &mut Context, block: Ptr<BasicBlock>, tys: &Tys, out: Value, off: Value) -> Value {
+    let p = emit(
+        ctx,
+        block,
+        MirPtrOffsetOp::get_concrete_op_info(),
+        vec![tys.out_ptr],
+        vec![out, off],
+    )
+    .unwrap();
+    emit(
+        ctx,
+        block,
+        MirLoadOp::get_concrete_op_info(),
+        vec![tys.f],
+        vec![p],
+    )
+    .unwrap()
 }
 
 /// `base[off]`, one element loaded from a `const T *` parameter.
@@ -597,7 +1076,8 @@ fn emit_value(
             )
             .unwrap();
             let callee = kind
-                .libdevice_name()
+                .libdevice_names()
+                .first()
                 .expect("the GELU entry names a libdevice symbol");
             let cdf = call(ctx, block, callee, tys.f, vec![t]);
             emit(
@@ -655,6 +1135,11 @@ fn emit_value(
         FusedKind::Permute12 => {
             let src = args[1];
             load_in(ctx, block, tys, src, read_index)
+        }
+        // Three passes rather than one value, so `emit_softmax` emits the
+        // whole body and `build_fused` branches away before here.
+        FusedKind::ScaleMaskSoftmax => {
+            unreachable!("the softmax fold emits its own loop bodies")
         }
     }
 }

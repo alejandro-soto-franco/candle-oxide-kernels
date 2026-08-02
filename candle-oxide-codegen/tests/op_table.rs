@@ -33,7 +33,7 @@ fn the_table_covers_the_v1_surface() {
             assert!(names.contains(&want.as_str()), "missing {want}");
         }
     }
-    // 5 fused entries, f32 only. Each carries its own parameter list and its
+    // 6 fused entries, f32 only. Each carries its own parameter list and its
     // own body rather than a stem crossed with a dtype.
     for (stem, kind) in [
         ("fused_scale_mask", FusedKind::ScaleMask),
@@ -41,6 +41,7 @@ fn the_table_covers_the_v1_surface() {
         ("fused_bias_residual", FusedKind::BiasResidual),
         ("fused_bias", FusedKind::Bias),
         ("fused_permute12", FusedKind::Permute12),
+        ("fused_scale_mask_softmax", FusedKind::ScaleMaskSoftmax),
     ] {
         let want = format!("{stem}_f32");
         let op = ops
@@ -57,25 +58,31 @@ fn the_table_covers_the_v1_surface() {
             "{stem} must not ship an f64 form nothing calls"
         );
     }
-    // Only the GELU entry calls libdevice, which is what decides whether a
+    // Two fused entries call libdevice, which is what decides whether a
     // fused build links against it.
     assert_eq!(
         ops.iter()
-            .filter(|op| op.family() == Family::Fused && op.libdevice_name().is_some())
+            .filter(|op| op.family() == Family::Fused && !op.libdevice_symbols().is_empty())
             .map(|op| op.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["fused_bias_gelu_erf_f32"]
+        vec!["fused_bias_gelu_erf_f32", "fused_scale_mask_softmax_f32"]
     );
     assert_eq!(
-        FusedKind::BiasGeluErf.libdevice_name(),
-        Some("__nv_normcdff"),
+        FusedKind::BiasGeluErf.libdevice_names(),
+        ["__nv_normcdff"],
         "any other Gaussian CDF loses bit-exactness against ugelu_erf_f32"
+    );
+    assert_eq!(
+        FusedKind::ScaleMaskSoftmax.libdevice_names(),
+        ["__nv_fmaxf", "__nv_expf"],
+        "maxg and expg at f32, which is what softmax_f32 reduces and \
+         exponentiates with"
     );
 
     assert_eq!(
         ops.len(),
-        51,
-        "12 binary + 12 comparison + 22 unary + 5 fused"
+        52,
+        "12 binary + 12 comparison + 22 unary + 6 fused"
     );
 }
 

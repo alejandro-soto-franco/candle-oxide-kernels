@@ -24,7 +24,7 @@ pub enum Arity {
     Binary,
     /// One of the fused family's entries, whose parameter list follows from
     /// the kind named in [`Body::Fused`] rather than from a buffer count:
-    /// the five kinds take three, four, four, five and five words.
+    /// the six kinds take three, four, four, four, five and five words.
     Fused,
 }
 
@@ -104,22 +104,49 @@ pub enum FusedKind {
     /// This is the one kind whose read and write rows differ, which is what
     /// the permutation is.
     Permute12,
+    /// [`FusedKind::ScaleMask`] with Candle's softmax folded onto it, so the
+    /// score tensor is never written between the two.
+    ///
+    /// Grid `(S, H, B)`, block `(32, 1, 1)`, with `s = ctaid.x`,
+    /// `h = ctaid.y`, `b = ctaid.z`, `S = nctaid.x` and `H = nctaid.y`. The
+    /// column count is `S`, so it comes from the grid too and this kind
+    /// takes no word-sized parameter at all.
+    ///
+    /// ```text
+    /// row  = ((b * H + h) * S + s) * S
+    /// mrow = (b * S + s) * S
+    /// t(col) = (scores[row + col] * scale + 0.0f) + mask[mrow + col]
+    /// ```
+    ///
+    /// `t(col)` stands where `softmax_f32` reads `x[row * ncols + col]`, in
+    /// the maximum pass and again in the exponential pass. Recomputing it is
+    /// the point: keeping it is what costs the round trip through memory.
+    ///
+    /// The reduction is Candle's, term for term
+    /// (`candle-kernels/src/reduce.cu:233-272`): a warp-wide butterfly over
+    /// lanes 16, 8, 4, 2 and 1 for the maximum, the same again for the sum,
+    /// and `1. / tmp` evaluated as a double reciprocal. It runs inside one
+    /// warp, so it needs no shared memory and no barrier. This is the one
+    /// kind whose result depends on the order of a floating-point reduction.
+    ScaleMaskSoftmax,
 }
 
 impl FusedKind {
-    /// The libdevice symbol this entry calls, if it calls one.
+    /// Every libdevice symbol this entry calls, in the order it calls them.
     ///
     /// `__nv_normcdff` is what Candle reaches through `normcdfg`
-    /// (`cuda_utils.cuh:140`) and `gelu_erf_fwd` (`unary.cu:32-33`). Any
-    /// other formulation loses bit-exactness against the kernel this chain
-    /// replaces.
-    pub fn libdevice_name(self) -> Option<&'static str> {
+    /// (`cuda_utils.cuh:140`) and `gelu_erf_fwd` (`unary.cu:32-33`);
+    /// `__nv_fmaxf` and `__nv_expf` are what `maxg` and `expg` reach at f32
+    /// (`cuda_utils.cuh:142,148`). Any other formulation loses
+    /// bit-exactness against the kernel the entry replaces.
+    pub fn libdevice_names(self) -> &'static [&'static str] {
         match self {
-            FusedKind::BiasGeluErf => Some("__nv_normcdff"),
+            FusedKind::BiasGeluErf => &["__nv_normcdff"],
+            FusedKind::ScaleMaskSoftmax => &["__nv_fmaxf", "__nv_expf"],
             FusedKind::ScaleMask
             | FusedKind::BiasResidual
             | FusedKind::Bias
-            | FusedKind::Permute12 => None,
+            | FusedKind::Permute12 => &[],
         }
     }
 }
@@ -210,13 +237,25 @@ impl OpDesc {
         }
     }
 
-    /// The libdevice symbol this entry calls, at its own dtype.
+    /// Every libdevice symbol this entry calls, at its own dtype.
+    ///
+    /// A fused entry may call more than one, so this is what decides whether
+    /// a module links against libdevice. [`OpDesc::libdevice_name`] answers
+    /// the narrower question `emit_body` asks, which is which single symbol
+    /// a [`Body::Libdevice`] entry is.
+    pub fn libdevice_symbols(&self) -> Vec<&'static str> {
+        match self.body {
+            Body::Fused(kind) => kind.libdevice_names().to_vec(),
+            _ => self.libdevice_name().into_iter().collect(),
+        }
+    }
+
+    /// The single libdevice symbol a [`Body::Libdevice`] entry calls, at its
+    /// own dtype. `None` for every other body, the fused family included:
+    /// a fused entry's symbols come from [`OpDesc::libdevice_symbols`].
     pub fn libdevice_name(&self) -> Option<&'static str> {
         let f32_name = match self.body {
             Body::Libdevice(name) => name,
-            // The fused family is f32 only, so the kind names its symbol
-            // directly and the dtype table below is bypassed.
-            Body::Fused(kind) => return kind.libdevice_name(),
             _ => return None,
         };
         Some(match (f32_name, self.dtype) {
@@ -325,6 +364,7 @@ pub fn fused_ops() -> Vec<OpDesc> {
         fused("fused_bias_residual", FusedKind::BiasResidual),
         fused("fused_bias", FusedKind::Bias),
         fused("fused_permute12", FusedKind::Permute12),
+        fused("fused_scale_mask_softmax", FusedKind::ScaleMaskSoftmax),
     ]
 }
 

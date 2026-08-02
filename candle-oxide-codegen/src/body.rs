@@ -42,7 +42,12 @@ pub(crate) fn call(
 }
 
 /// Cast a float value to another float width.
-fn fp_cast(ctx: &mut Context, block: Ptr<BasicBlock>, v: Value, to: TypeHandle) -> Value {
+pub(crate) fn fp_cast(
+    ctx: &mut Context,
+    block: Ptr<BasicBlock>,
+    v: Value,
+    to: TypeHandle,
+) -> Value {
     let op = Operation::new(
         ctx,
         MirCastOp::get_concrete_op_info(),

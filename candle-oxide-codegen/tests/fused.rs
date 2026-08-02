@@ -55,6 +55,7 @@ fn the_family_holds_exactly_the_entries_the_table_names() {
             "fused_bias_residual_f32",
             "fused_bias_f32",
             "fused_permute12_f32",
+            "fused_scale_mask_softmax_f32",
         ],
         "the family's entry names are part of the interface"
     );
@@ -196,6 +197,132 @@ fn bias_adds_once_and_calls_nothing() {
     );
 }
 
+#[test]
+fn scale_mask_softmax_declares_four_words_with_scale_last() {
+    let ptx = fused_ptx();
+    assert_eq!(
+        param_shapes(&ptx, "fused_scale_mask_softmax_f32"),
+        vec![
+            PTR,           // scores
+            PTR,           // mask
+            PTR,           // out
+            ".param .f32", // scale
+        ],
+        "fused_scale_mask_softmax_f32 ABI:\n{ptx}"
+    );
+}
+
+/// The number of lines carrying both needles.
+fn lines_with(body: &str, first: &str, second: &str) -> usize {
+    body.lines()
+        .filter(|line| line.contains(first) && line.contains(second))
+        .count()
+}
+
+/// The reduction gate.
+///
+/// This is the first entry whose result depends on the order of a
+/// floating-point reduction, so the shuffle sequence is the interface as
+/// much as the parameter list is. Candle exchanges with the lanes 16, 8, 4,
+/// 2 and 1 bits away, for the maximum and again for the sum, folding each
+/// partner in as it arrives. Ten exchanges, and a tree of any other shape
+/// reduces the same numbers to a different float.
+#[test]
+fn the_softmax_fold_reduces_over_candle_butterfly() {
+    let ptx = fused_ptx();
+    let body = entry_body(&ptx, "fused_scale_mask_softmax_f32");
+    assert_eq!(
+        body.matches("shfl.sync.bfly").count(),
+        10,
+        "five butterfly exchanges for the maximum and five for the sum:\n{body}"
+    );
+    // The deltas in order, twice over. Each exchange reads
+    // `<dst>, <value>, <delta>, 31, -1`, where `31` is the clamp for a
+    // 32-lane width and `-1` the full member mask, both of which Candle
+    // passes.
+    let deltas: Vec<&str> = body
+        .lines()
+        .filter(|line| line.contains("shfl.sync.bfly"))
+        .map(|line| {
+            assert!(
+                line.contains(", 31, -1;"),
+                "every exchange runs over the whole warp: {line}"
+            );
+            line.split(", ").nth(2).unwrap_or_default()
+        })
+        .collect();
+    assert_eq!(
+        deltas,
+        vec!["16", "8", "4", "2", "1", "16", "8", "4", "2", "1"],
+        "the butterfly order is the result:\n{body}"
+    );
+    // `maxg` and `expg` at f32, which is what the two passes fold with.
+    assert!(
+        body.contains("max.f32"),
+        "the maximum pass lost __nv_fmaxf:\n{body}"
+    );
+    assert!(
+        body.contains("ex2.approx.ftz.f32"),
+        "the exponential pass lost __nv_expf:\n{body}"
+    );
+}
+
+/// The reciprocal gate.
+///
+/// `const ACC inv_tmp = 1. / tmp` reads as a double round trip, and neither
+/// nvcc nor this pipeline keeps one: both fold it to a single correctly
+/// rounded `rcp.rn.f32`, which is the same number, since a double quotient
+/// carries more than twice a float's significand and rounding it twice lands
+/// where rounding once would. Checked against nvcc's own
+/// `.visible .entry softmax_f32`, which emits `rcp.rn.f32` at the
+/// corresponding point. `urecip_f32` takes the same shape and lowers the
+/// same way.
+///
+/// A surviving `div.rn.f64` would mean the fold stopped happening here while
+/// it still happens in the kernel being replaced, and an approximate
+/// reciprocal would be a different number outright.
+#[test]
+fn the_softmax_fold_takes_a_correctly_rounded_reciprocal() {
+    let ptx = fused_ptx();
+    let body = entry_body(&ptx, "fused_scale_mask_softmax_f32");
+    assert_eq!(
+        body.matches("rcp.rn.f32").count(),
+        1,
+        "one correctly rounded reciprocal of the reduced sum:\n{body}"
+    );
+    for wrong in ["div.rn.f64", "div.rn.f32", "rcp.approx", "rcp.rn.f64"] {
+        assert_eq!(
+            body.matches(wrong).count(),
+            0,
+            "{wrong} is not what nvcc emits for `1. / tmp`:\n{body}"
+        );
+    }
+}
+
+/// The scale and the mask keep the three roundings round one established,
+/// in both passes that recompute them.
+#[test]
+fn the_softmax_fold_keeps_the_scale_and_mask_roundings() {
+    let ptx = fused_ptx();
+    let body = entry_body(&ptx, "fused_scale_mask_softmax_f32");
+    // `affine_f32`'s `+ 0.0f`, once in the maximum pass and once in the
+    // exponential pass, since the value is recomputed rather than kept.
+    assert_eq!(
+        lines_with(body, "add.rn.f32", "0f00000000"),
+        2,
+        "both passes add affine_f32's zero:\n{body}"
+    );
+    // The multiply and that add stay apart. Contraction is off for the
+    // family, and the FMAs present here belong to the inlined exponential
+    // rather than to the scale, so the count is scoped to the zero add
+    // above and to the absence of a fused multiply against the scale.
+    assert_eq!(
+        lines_with(body, "fma", "0f00000000"),
+        0,
+        "the scale and the zero add must not contract:\n{body}"
+    );
+}
+
 /// The division gate.
 ///
 /// The launch is shaped like the tensor so that every index term comes from
@@ -249,6 +376,25 @@ fn each_chain_reads_the_grid_coordinates_its_geometry_names() {
             "fused_permute12_f32 does not read {sreg}:\n{permute}"
         );
     }
+
+    // `(S, H, B)` with the column count taken from the grid's own x extent,
+    // which is why this entry takes no word-sized parameter.
+    let softmax = entry_body(&ptx, "fused_scale_mask_softmax_f32");
+    for sreg in ["%tid.x", "%ctaid.x", "%ctaid.y", "%ctaid.z", "%nctaid.y"] {
+        assert!(
+            softmax.contains(sreg),
+            "fused_scale_mask_softmax_f32 does not read {sreg}:\n{softmax}"
+        );
+    }
+    // The lane stride is the literal 32 rather than `ntid.x`. The block is
+    // one warp and the caller enforces it, so reading the extent would only
+    // leave the trip count as a runtime division. Candle's own softmax
+    // carries three `div.u32` for exactly that reason.
+    assert!(
+        !softmax.contains("%ntid.x"),
+        "fused_scale_mask_softmax_f32 reads %ntid.x, which puts a division \
+         back into the trip count:\n{softmax}"
+    );
 
     // `(ceil(d / block), rows, 1)`: one row per `ctaid.y`, and the z
     // dimension is unused, so reading it would mean the geometry drifted.
@@ -345,16 +491,20 @@ fn only_the_fused_family_switches_contraction_off() {
     assert!(!Family::Fused.fma_contraction());
 }
 
-/// A fused set without the GELU entry names no libdevice symbol, so it
-/// compiles self-contained. This is the first op set in the workspace to
-/// reach that path in `build_family`.
+/// A fused set holding neither the GELU entry nor the softmax fold names no
+/// libdevice symbol, so it compiles self-contained. This is the only op set
+/// in the workspace to reach that path in `build_family`.
 #[test]
-fn a_fused_set_without_the_gelu_entry_needs_no_libdevice() {
+fn a_fused_set_without_the_libdevice_entries_links_self_contained() {
     let ops: Vec<_> = fused_ops()
         .into_iter()
-        .filter(|op| op.libdevice_name().is_none())
+        .filter(|op| op.libdevice_symbols().is_empty())
         .collect();
-    assert_eq!(ops.len(), 4, "only the GELU entry calls libdevice");
+    assert_eq!(
+        ops.len(),
+        4,
+        "only the GELU entry and the softmax fold call libdevice"
+    );
     let ptx = build_family(Family::Fused, &ops, "sm_80").unwrap();
     for op in &ops {
         assert!(

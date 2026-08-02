@@ -122,6 +122,37 @@ fn the_shipped_scale_mask_entry_rounds_where_the_reference_rounds() {
     );
 }
 
+/// The reduction and reciprocal gates, applied to the bytes this crate
+/// actually ships.
+///
+/// `fused_scale_mask_softmax_f32` is the one entry whose result depends on
+/// the order of a floating-point reduction, so the shuffle sequence is part
+/// of its interface. Candle exchanges with the lanes 16, 8, 4, 2 and 1 bits
+/// away, for the maximum and again for the sum, and folds `1. / tmp` to one
+/// correctly rounded single-precision reciprocal, which is what nvcc emits
+/// at the corresponding point in its own `softmax_f32`.
+#[test]
+fn the_shipped_softmax_fold_reduces_and_divides_as_candle_does() {
+    let body = entry_body(k::FUSED, "fused_scale_mask_softmax_f32");
+    assert_eq!(
+        body.matches("shfl.sync.bfly").count(),
+        10,
+        "five butterfly exchanges for the maximum and five for the sum:\n{body}"
+    );
+    assert_eq!(
+        body.matches("rcp.rn.f32").count(),
+        1,
+        "one correctly rounded reciprocal of the reduced sum:\n{body}"
+    );
+    for wrong in ["div.rn.f64", "div.rn.f32", "rcp.approx"] {
+        assert_eq!(
+            body.matches(wrong).count(),
+            0,
+            "{wrong} is not what nvcc emits for `1. / tmp`:\n{body}"
+        );
+    }
+}
+
 /// The division gate, applied to the bytes this crate actually ships.
 ///
 /// Every fused entry takes its row from the grid, so no index term is

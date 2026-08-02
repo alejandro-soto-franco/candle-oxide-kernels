@@ -127,6 +127,17 @@ pub const UNARY_ENTRIES: &[&str] = &[
 ///     k = tid.x, strided by ntid.x while k < d
 ///     out[((b * D2 + j) * D1 + i) * d + k]
 ///         = src[((b * D1 + i) * D2 + j) * d + k]
+///
+/// fused_scale_mask_softmax_f32(scores: *const f32, mask: *const f32,
+///                              out: *mut f32, scale: f32)
+///     grid (S, H, B), block (32, 1, 1)
+///     s = ctaid.x,  h = ctaid.y,  b = ctaid.z
+///     S = nctaid.x, H = nctaid.y
+///     row  = ((b * H + h) * S + s) * S
+///     mrow = (b * S + s) * S
+///     col  = tid.x, strided by 32 while col < S
+///     t(col) = (scores[row + col] * scale + 0.0f) + mask[mrow + col]
+///     out[row + ...] = softmax over t, Candle's own reduction
 /// ```
 ///
 /// `fused_scale_mask_f32` reads `x` as `[B, H, S, S]` and `mask` as
@@ -146,8 +157,19 @@ pub const UNARY_ENTRIES: &[&str] = &[
 ///
 /// `fused_permute12_f32` takes its column from `tid.x` alone, stepping by
 /// `ntid.x`, because `ctaid.x` names a permuted dimension and cannot also
-/// index the column. Every other entry takes its column from
+/// index the column. `fused_scale_mask_softmax_f32` takes its column from
+/// `tid.x` too, stepping by a literal 32, since its block is fixed at one
+/// warp. Every other entry takes its column from
 /// `ctaid.x * ntid.x + tid.x`, stepping by `ntid.x * nctaid.x`.
+///
+/// `fused_scale_mask_softmax_f32` folds Candle's softmax onto the scale and
+/// the mask, so the score tensor is never written between the two. Its block
+/// must be exactly one warp: the reduction is `softmax_f32`'s own butterfly
+/// over the lanes 16, 8, 4, 2 and 1, reproduced term for term, and it needs
+/// no shared memory and no barrier. `scores` is `[B, H, S, S]`, `mask` is
+/// `[B, 1, S, S]`, the last two dimensions of `scores` must be equal because
+/// the column count and the grid's x extent are the same number, and `out`
+/// is written twice, so it may not alias either input.
 ///
 /// `fused_scale_mask_f32` replaces `affine_f32` followed by `badd_f32`,
 /// and `affine_f32`'s body is
@@ -164,6 +186,7 @@ pub const FUSED_ENTRIES: &[&str] = &[
     "fused_bias_residual_f32",
     "fused_bias_f32",
     "fused_permute12_f32",
+    "fused_scale_mask_softmax_f32",
 ];
 
 /// Whether `module` provides `name`. Returns false for an unknown module.
