@@ -1,6 +1,6 @@
 # Oracle PTX
 
-One file per entry, sliced from the module `candle-oxide-kernel` emits. Each
+One file per entry, sliced from the module `candle-oxide-oracle` emits. Each
 file holds that entry's `.visible .entry` body verbatim, preceded by the
 module's `.version` / `.target` / `.address_size` lines. `tests/oracle.rs`
 reads them, so regenerating is a diff.
@@ -28,12 +28,12 @@ whose arithmetic the builder emits itself (`badd`, `bsub`, `bmul`, `bdiv`,
 
 ## Provenance
 
-- Source: `$ORACLE_SRC` (a checkout of `candle-oxide-kernel`), `src/main.rs`,
+- Source: `$ORACLE_SRC` (a checkout of `candle-oxide-oracle`), `src/main.rs`,
   at commit `91334cc` on branch `feat/oracle-elementwise`.
 - Toolchain: `nightly-2026-04-03` (`rustc 1.96.0-nightly 55e86c996`,
   LLVM 22.1.2), pinned by that crate's `rust-toolchain.toml`.
 - cuda-oxide revision: `0810ba95`, the same revision this crate builds
-  against. `candle-oxide-kernel` takes `cuda-device`, `cuda-host` and
+  against. `candle-oxide-oracle` takes `cuda-device`, `cuda-host` and
   `cuda-core` by path from `$CUDA_OXIDE` (a checkout of cuda-oxide at that
   revision, kept outside this repository).
 - Codegen backend: `librustc_codegen_cuda.so` built from
@@ -57,7 +57,7 @@ LD_LIBRARY_PATH="$(rustc --print sysroot)/lib" \
 cd "$ORACLE_SRC"
 CUDA_OXIDE_BACKEND=<that target directory>/x86_64-unknown-linux-gnu/debug/librustc_codegen_cuda.so \
   cargo oxide build --arch sm_80
-# writes candle_oxide_kernel.ptx at the crate root; scripts/split_oracle.py
+# writes candle_oxide_oracle.ptx at the crate root; scripts/split_oracle.py
 # slices it into this directory.
 python3 "$ORACLE_SRC/scripts/split_oracle.py"
 ```

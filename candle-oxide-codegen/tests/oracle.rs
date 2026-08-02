@@ -1,7 +1,7 @@
 //! Differential oracle: the standalone MIR builder against the `#[kernel]`
 //! frontend.
 //!
-//! `candle-oxide-kernel` writes the same 30 elementwise entries in Rust and
+//! `candle-oxide-oracle` writes the same 30 elementwise entries in Rust and
 //! lowers them through cuda-oxide's rustc codegen backend. Its PTX is checked
 //! in under `oracle/`, one file per entry, so this test needs no device
 //! toolchain and drift shows up as a diff. `oracle/README.md` records the
