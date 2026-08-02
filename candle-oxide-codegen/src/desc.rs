@@ -16,11 +16,16 @@ impl DType {
     }
 }
 
-/// Number of input buffers an entry reads.
+/// The parameter-list shape an entry declares, and with it the builder that
+/// emits it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Arity {
     Unary,
     Binary,
+    /// One of the fused chains, whose parameter list follows from the chain
+    /// named in [`Body::Fused`] rather than from a buffer count: the three
+    /// chains take five, six and seven words.
+    Fused,
 }
 
 /// Element type of an entry's output buffer.
@@ -42,6 +47,43 @@ pub enum CmpKind {
     Ge,
 }
 
+/// One of the three fused chains, each replacing a run of two Candle
+/// elementwise kernels with a single grid-stride pass.
+///
+/// The variant fixes the parameter list and the arithmetic together, since
+/// for a fused entry the two are one choice. Every chain assumes contiguous
+/// operands, which is what lets the operand index be an explicit expression
+/// on the induction variable rather than a `num_dims`-deep walk.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FusedChain {
+    /// `out[i] = x[i] * scale + mask[(i / hss) * ss + (i % ss)]`, over
+    /// `x` of shape `[B, H, S, S]` and `mask` of shape `[B, 1, S, S]`,
+    /// with `hss = H*S*S` and `ss = S*S`.
+    ScaleMask,
+    /// `t = x[i] + bias[i % d]; out[i] = t * normcdf(t)`.
+    BiasGeluErf,
+    /// `out[i] = (x[i] + bias[i % d]) + residual[i]`. The parenthesisation
+    /// is the order Candle evaluates, `Linear::forward` adding the bias
+    /// before the caller adds the residual, and reassociating changes the
+    /// result.
+    BiasResidual,
+}
+
+impl FusedChain {
+    /// The libdevice symbol this chain calls, if it calls one.
+    ///
+    /// `__nv_normcdff` is what Candle reaches through `normcdfg`
+    /// (`cuda_utils.cuh:140`) and `gelu_erf_fwd` (`unary.cu:32-33`). Any
+    /// other formulation loses bit-exactness against the kernel this chain
+    /// replaces.
+    pub fn libdevice_name(self) -> Option<&'static str> {
+        match self {
+            FusedChain::BiasGeluErf => Some("__nv_normcdff"),
+            FusedChain::ScaleMask | FusedChain::BiasResidual => None,
+        }
+    }
+}
+
 /// What an entry computes from its loaded operands.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Body {
@@ -61,6 +103,10 @@ pub enum Body {
     /// A libdevice call named directly, one argument per operand. The name
     /// is the f32 form; `libdevice_name` picks the f64 form by dtype.
     Libdevice(&'static str),
+    /// A fused chain, whose loads, index arithmetic and stores are one
+    /// expression rather than a function of already-loaded operands.
+    /// `fused.rs` emits it whole, so `emit_body` never sees this.
+    Fused(FusedChain),
 }
 
 /// Which PTX artifact an entry is packaged into.
@@ -68,6 +114,7 @@ pub enum Body {
 pub enum Family {
     Binary,
     Unary,
+    Fused,
 }
 
 impl Family {
@@ -75,6 +122,23 @@ impl Family {
         match self {
             Family::Binary => "binary.ptx",
             Family::Unary => "unary.ptx",
+            Family::Fused => "fused.ptx",
+        }
+    }
+
+    /// Whether this family compiles with FMA contraction on.
+    ///
+    /// The elementwise families match nvcc's default, so their parity
+    /// comparisons are against like. The fused family switches it off for
+    /// `fused_scale_mask_f32`: contraction turns `x * scale + mask` into one
+    /// FMA and so into one rounding, while the two kernels it replaces round
+    /// the multiply to memory and add the mask separately. The more accurate
+    /// answer is the wrong one here. The other two chains carry no
+    /// contraction site, so the setting costs them nothing.
+    pub fn fma_contraction(self) -> bool {
+        match self {
+            Family::Binary | Family::Unary => true,
+            Family::Fused => false,
         }
     }
 }
@@ -94,6 +158,15 @@ impl OpDesc {
         match self.arity {
             Arity::Unary => Family::Unary,
             Arity::Binary => Family::Binary,
+            Arity::Fused => Family::Fused,
+        }
+    }
+
+    /// The chain this entry computes, for a fused entry.
+    pub fn chain(&self) -> Option<FusedChain> {
+        match self.body {
+            Body::Fused(chain) => Some(chain),
+            _ => None,
         }
     }
 
@@ -101,6 +174,9 @@ impl OpDesc {
     pub fn libdevice_name(&self) -> Option<&'static str> {
         let f32_name = match self.body {
             Body::Libdevice(name) => name,
+            // The fused chains are f32 only, so the chain names its symbol
+            // directly and the dtype table below is bypassed.
+            Body::Fused(chain) => return chain.libdevice_name(),
             _ => return None,
         };
         Some(match (f32_name, self.dtype) {
@@ -149,6 +225,16 @@ fn unary(stem: &str, dtype: DType, body: Body) -> OpDesc {
     }
 }
 
+fn fused(stem: &str, chain: FusedChain) -> OpDesc {
+    OpDesc {
+        name: format!("{stem}_{}", DType::F32.suffix()),
+        dtype: DType::F32,
+        arity: Arity::Fused,
+        out: OutType::Same,
+        body: Body::Fused(chain),
+    }
+}
+
 /// Every binary entry, arithmetic then comparison.
 pub fn binary_ops() -> Vec<OpDesc> {
     let mut ops = Vec::new();
@@ -188,9 +274,22 @@ pub fn unary_ops() -> Vec<OpDesc> {
     ops
 }
 
-/// Every entry in both families.
+/// Every fused chain entry.
+///
+/// f32 only. The chains exist for one model's f32 forward pass, and an f64
+/// form would ship three entries nothing calls.
+pub fn fused_ops() -> Vec<OpDesc> {
+    vec![
+        fused("fused_scale_mask", FusedChain::ScaleMask),
+        fused("fused_bias_gelu_erf", FusedChain::BiasGeluErf),
+        fused("fused_bias_residual", FusedChain::BiasResidual),
+    ]
+}
+
+/// Every entry in every family.
 pub fn all_ops() -> Vec<OpDesc> {
     let mut ops = binary_ops();
     ops.extend(unary_ops());
+    ops.extend(fused_ops());
     ops
 }

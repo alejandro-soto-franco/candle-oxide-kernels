@@ -2,7 +2,21 @@
 
 Elementwise CUDA kernels for Candle, generated as PTX by cuda-oxide.
 
-This crate ships precompiled PTX for 46 entry points across two modules: `oxide::binary` (24 kernels for binary operations) and `oxide::unary` (22 kernels for unary operations). The PTX is generated offline and committed, so this crate carries no build dependencies and requires no nightly toolchain.
+This crate ships precompiled PTX for 49 entry points across three modules: `oxide::binary` (24 kernels for binary operations), `oxide::unary` (22 kernels for unary operations) and `oxide::fused` (3 fused chains). The PTX is generated offline and committed, so this crate carries no build dependencies and requires no nightly toolchain.
+
+## Fused chains
+
+`oxide::fused` holds three f32 entries, each collapsing a run of two elementwise kernels into one grid-stride pass:
+
+| entry | computes |
+| --- | --- |
+| `fused_scale_mask_f32` | `out[i] = x[i] * scale + mask[(i / hss) * ss + (i % ss)]` |
+| `fused_bias_gelu_erf_f32` | `t = x[i] + bias[i % d]; out[i] = t * normcdf(t)` |
+| `fused_bias_residual_f32` | `out[i] = (x[i] + bias[i % d]) + residual[i]` |
+
+Every operand must be contiguous and f32. There is no layout branching and no stride walk, which is what the contiguity precondition buys; a caller that cannot establish it evaluates the reference expression instead. `FUSED_ENTRIES` carries the full parameter list of each entry.
+
+This family compiles with FMA contraction off, where the elementwise families compile with it on to match nvcc's default. `fused_scale_mask_f32` replaces `affine_f32` followed by `badd_f32`, which rounds the product to memory before it adds the mask, so contracting the multiply and the add into one FMA would round once where the path being replaced rounds twice. The other two chains carry no contraction site.
 
 ## Architecture
 
@@ -13,6 +27,12 @@ The committed PTX targets `sm_75` (Turing). Every load goes through the CUDA dri
 Every pointer parameter carries a `.ptr .global .align 1` annotation, the most conservative alignment declaration possible. Neither this pipeline nor nvcc vectorises loads for these entries, so the annotation costs nothing: there is no wider load for it to inhibit.
 
 ## Verification
+
+The figures below cover the 46 elementwise entries. The three fused chains have no nvcc
+counterpart to diff against, so their host-side checks are the declared ABI, the libdevice
+symbol the GELU chain resolves to, the absence of a contracted multiply-add in
+`fused_scale_mask_f32`, and `ptxas` acceptance at the shipped baseline and at `sm_120`.
+Numeric parity for those three runs on a GPU, in the consuming Candle checkout.
 
 These kernels are bit-exact against Candle's own nvcc-built kernels. The parity suite in the
 consuming Candle checkout runs 63 cases at difference exactly 0.0, with no tolerance, covering

@@ -6,6 +6,7 @@ pub mod binary;
 pub mod body;
 pub mod desc;
 pub mod emit;
+pub mod fused;
 pub mod index;
 pub mod testing;
 pub mod unary;
@@ -18,12 +19,14 @@ use desc::{Arity, Family, OpDesc};
 /// Compile every entry in `ops` into one PTX module for `family`.
 ///
 /// Linking is opted in whenever an entry names a libdevice symbol, which
-/// #596 made possible. Contraction is set explicitly to nvcc's default so
-/// parity comparisons are against like, never inherited.
+/// #596 made possible. Contraction is set explicitly per family rather than
+/// inherited, so parity comparisons are against like: see
+/// [`Family::fma_contraction`].
 pub fn build_family(family: Family, ops: &[OpDesc], target: &str) -> Result<String, CompileError> {
     let mut module = CodegenModule::new(match family {
         Family::Binary => "candle_oxide_binary",
         Family::Unary => "candle_oxide_unary",
+        Family::Fused => "candle_oxide_fused",
     })
     .expect("module name is valid");
 
@@ -38,22 +41,22 @@ pub fn build_family(family: Family, ops: &[OpDesc], target: &str) -> Result<Stri
         match op.arity {
             Arity::Binary => binary::build_binary(&mut module, op),
             Arity::Unary => unary::build_unary(&mut module, op),
+            Arity::Fused => fused::build_fused(&mut module, op),
         }
     }
 
     let needs_libdevice = ops.iter().any(|op| op.libdevice_name().is_some());
     let compiler = Compiler::discover().expect("LLVM 21+ llc and opt are installed");
     let options = CompileOptions::new(Target::parse(target).expect("valid target"))
-        .with_fma_contraction(true)
+        .with_fma_contraction(family.fma_contraction())
         .with_linking(if needs_libdevice {
             Linking::Libdevice
         } else {
-            // Unreachable today: both families always contain at least one
-            // libdevice-backed op (`bmaximum`/`bminimum` in binary; `uexp`,
-            // `ulog`, `usin`, `ucos`, `usqrt` in unary), so `needs_libdevice`
-            // is always true for `all_ops()`-derived sets. Kept for a future
-            // op set built entirely from this crate's own arithmetic, with
-            // no libdevice call in it.
+            // Reached by a fused set that leaves `fused_bias_gelu_erf_f32`
+            // out, the only fused entry naming a symbol. The two elementwise
+            // families always carry one (`bmaximum`/`bminimum` in binary;
+            // `uexp`, `ulog`, `usin`, `ucos`, `usqrt` in unary), so a
+            // `binary_ops()` or `unary_ops()` set never lands here.
             Linking::SelfContained
         });
 

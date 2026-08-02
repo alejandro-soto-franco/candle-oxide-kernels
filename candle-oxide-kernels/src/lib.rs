@@ -14,11 +14,22 @@ pub const BINARY: &str = include_str!("../ptx/binary.ptx");
 /// PTX holding every unary entry point.
 pub const UNARY: &str = include_str!("../ptx/unary.ptx");
 
+/// PTX holding every fused chain entry point.
+///
+/// Each entry replaces a run of two elementwise kernels with one
+/// grid-stride pass and assumes contiguous f32 operands. A caller that
+/// cannot establish that precondition evaluates the reference expression
+/// instead.
+pub const FUSED: &str = include_str!("../ptx/fused.ptx");
+
 /// Key for `get_or_load_custom_func` when loading [`BINARY`].
 pub const BINARY_MODULE: &str = "oxide::binary";
 
 /// Key for `get_or_load_custom_func` when loading [`UNARY`].
 pub const UNARY_MODULE: &str = "oxide::unary";
+
+/// Key for `get_or_load_custom_func` when loading [`FUSED`].
+pub const FUSED_MODULE: &str = "oxide::fused";
 
 /// Every entry point in [`BINARY`].
 pub const BINARY_ENTRIES: &[&str] = &[
@@ -74,11 +85,44 @@ pub const UNARY_ENTRIES: &[&str] = &[
     "utanh_f64",
 ];
 
+/// Every entry point in [`FUSED`].
+///
+/// Each takes its arguments positionally, every `size_t` as a `.u64` word,
+/// and `fused_scale_mask_f32`'s `scale` as the single `.f32`, placed last so
+/// the word-sized parameters stay contiguous:
+///
+/// ```text
+/// fused_scale_mask_f32(numel: size_t, hss: size_t, ss: size_t,
+///                      x: *const f32, mask: *const f32, out: *mut f32,
+///                      scale: f32)
+///     out[i] = x[i] * scale + mask[(i / hss) * ss + (i % ss)]
+///
+/// fused_bias_gelu_erf_f32(numel: size_t, d: size_t,
+///                         x: *const f32, bias: *const f32, out: *mut f32)
+///     t = x[i] + bias[i % d]
+///     out[i] = t * normcdf(t)
+///
+/// fused_bias_residual_f32(numel: size_t, d: size_t,
+///                         x: *const f32, bias: *const f32,
+///                         residual: *const f32, out: *mut f32)
+///     out[i] = (x[i] + bias[i % d]) + residual[i]
+/// ```
+///
+/// `fused_scale_mask_f32` reads `x` as `[B, H, S, S]` and `mask` as
+/// `[B, 1, S, S]`, with `hss = H*S*S` and `ss = S*S`. Every operand of every
+/// entry must be contiguous and f32.
+pub const FUSED_ENTRIES: &[&str] = &[
+    "fused_scale_mask_f32",
+    "fused_bias_gelu_erf_f32",
+    "fused_bias_residual_f32",
+];
+
 /// Whether `module` provides `name`. Returns false for an unknown module.
 pub fn has_entry(module: &str, name: &str) -> bool {
     match module {
         BINARY_MODULE => BINARY_ENTRIES.contains(&name),
         UNARY_MODULE => UNARY_ENTRIES.contains(&name),
+        FUSED_MODULE => FUSED_ENTRIES.contains(&name),
         _ => false,
     }
 }
@@ -88,6 +132,7 @@ pub fn ptx_for(module: &str) -> Option<&'static str> {
     match module {
         BINARY_MODULE => Some(BINARY),
         UNARY_MODULE => Some(UNARY),
+        FUSED_MODULE => Some(FUSED),
         _ => None,
     }
 }

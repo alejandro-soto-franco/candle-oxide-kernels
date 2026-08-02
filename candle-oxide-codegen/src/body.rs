@@ -20,7 +20,7 @@ use pliron::{
 };
 
 /// Emit a call to `callee` with `args`, returning its single result.
-fn call(
+pub(crate) fn call(
     ctx: &mut Context,
     block: Ptr<BasicBlock>,
     callee: &str,
@@ -146,6 +146,11 @@ pub fn emit_body(
             let callee = op.libdevice_name().expect("Body::Libdevice carries a name");
             call(ctx, block, callee, f, xs.to_vec())
         }
+        // A fused chain owns its loads and its index arithmetic as well as
+        // its arithmetic, so `fused.rs` emits the whole loop body and never
+        // routes through here. Reaching this arm means an entry described as
+        // fused was handed to the binary or unary builder.
+        Body::Fused(chain) => unreachable!("{chain:?} is emitted by fused.rs, not by emit_body"),
         Body::Cmp(kind) => {
             let info = match kind {
                 CmpKind::Eq => MirEqOp::get_concrete_op_info(),

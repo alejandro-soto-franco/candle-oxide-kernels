@@ -6,16 +6,15 @@
 //! Each family's file is written atomically: [`write_family`] writes to a
 //! process-unique temporary path and renames it onto the destination, so no
 //! reader ever observes a partially written PTX file. This is per-file
-//! atomicity only. Building both families before writing either means a
-//! build failure leaves every committed artifact untouched, but the two
-//! writes themselves are independent: if writing `binary.ptx` succeeds and
-//! writing `unary.ptx` then fails, `binary.ptx` is left updated while
-//! `unary.ptx` is not. There is no cross-family transaction. A torn pair
-//! like that is caught by the reproducibility check a later task adds, not
-//! by this tool.
+//! atomicity only. Building every family before writing any of them means a
+//! build failure leaves every committed artifact untouched, and the writes
+//! themselves stay independent: if writing `binary.ptx` succeeds and writing
+//! `unary.ptx` then fails, `binary.ptx` is left updated while `unary.ptx` is
+//! not. There is no cross-family transaction. A torn set like that is caught
+//! by the reproducibility check in `tests/reproducible.rs`, not by this tool.
 
 use candle_oxide_codegen::build_family;
-use candle_oxide_codegen::desc::{binary_ops, unary_ops, Family};
+use candle_oxide_codegen::desc::{binary_ops, fused_ops, unary_ops, Family};
 use cuda_oxide_codegen::experimental::Target;
 use std::path::{Path, PathBuf};
 
@@ -82,9 +81,13 @@ fn main() {
         std::process::exit(1);
     }
 
-    // Build both families before writing either, so a failure in the second
-    // leaves the first's committed artifact untouched.
-    let families = [(Family::Binary, binary_ops()), (Family::Unary, unary_ops())];
+    // Build every family before writing any of them, so a failure in a later
+    // one leaves the earlier committed artifacts untouched.
+    let families = [
+        (Family::Binary, binary_ops()),
+        (Family::Unary, unary_ops()),
+        (Family::Fused, fused_ops()),
+    ];
     let mut built = Vec::new();
     for (family, ops) in families {
         match build_family(family, &ops, &arch) {

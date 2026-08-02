@@ -1,5 +1,5 @@
 //! Guards against a committed artifact drifting from the source that
-//! generates it. Regenerates both families into a scratch directory and
+//! generates it. Regenerates every family into a scratch directory and
 //! diffs the result against `candle-oxide-kernels/ptx/`.
 //!
 //! This only proves anything because generation is deterministic: two runs
@@ -69,18 +69,24 @@ fn regenerating_reproduces_the_committed_artifacts() {
 
     let committed_binary = std::fs::read_to_string(committed.join("binary.ptx")).unwrap();
     let committed_unary = std::fs::read_to_string(committed.join("unary.ptx")).unwrap();
+    let committed_fused = std::fs::read_to_string(committed.join("fused.ptx")).unwrap();
 
     // The baseline to regenerate at comes from the committed artifact's own
     // `.target` line, not a literal in this test, so this test cannot drift
-    // from whatever is actually shipped. Both families must agree: a torn
-    // pair here would mean the atomicity contract `write_family` documents
-    // has already been violated, which this test should catch too.
+    // from whatever is actually shipped. Every family must agree: a torn set
+    // here would mean the atomicity contract `write_family` documents has
+    // already been violated, which this test should catch too.
     let arch = declared_target(&committed_binary);
-    assert_eq!(
-        arch,
-        declared_target(&committed_unary),
-        "binary.ptx and unary.ptx declare different .target architectures"
-    );
+    for (name, other) in [
+        ("unary.ptx", &committed_unary),
+        ("fused.ptx", &committed_fused),
+    ] {
+        assert_eq!(
+            arch,
+            declared_target(other),
+            "binary.ptx and {name} declare different .target architectures"
+        );
+    }
 
     let out = Command::new(env!("CARGO_BIN_EXE_xtask"))
         .args(["gen-ptx", "--arch", arch, "--out"])
@@ -96,6 +102,7 @@ fn regenerating_reproduces_the_committed_artifacts() {
     for (name, want) in [
         ("binary.ptx", &committed_binary),
         ("unary.ptx", &committed_unary),
+        ("fused.ptx", &committed_fused),
     ] {
         let got = std::fs::read_to_string(fresh.join(name)).unwrap();
         assert_matches_committed(name, want, &got);
