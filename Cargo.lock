@@ -170,7 +170,7 @@ dependencies = [
 [[package]]
 name = "cuda-oxide-codegen"
 version = "0.1.0"
-source = "git+https://github.com/NVlabs/cuda-oxide?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
+source = "git+https://github.com/NVIDIA/cuda-rust?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
 dependencies = [
  "dialect-mir",
  "dialect-nvvm",
@@ -187,7 +187,7 @@ dependencies = [
 [[package]]
 name = "dialect-mir"
 version = "0.2.1"
-source = "git+https://github.com/NVlabs/cuda-oxide?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
+source = "git+https://github.com/NVIDIA/cuda-rust?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
 dependencies = [
  "combine",
  "linkme",
@@ -200,7 +200,7 @@ dependencies = [
 [[package]]
 name = "dialect-nvvm"
 version = "0.2.1"
-source = "git+https://github.com/NVlabs/cuda-oxide?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
+source = "git+https://github.com/NVIDIA/cuda-rust?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
 dependencies = [
  "combine",
  "dialect-mir",
@@ -310,7 +310,7 @@ dependencies = [
 [[package]]
 name = "libnvvm-sys"
 version = "0.2.1"
-source = "git+https://github.com/NVlabs/cuda-oxide?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
+source = "git+https://github.com/NVIDIA/cuda-rust?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
 dependencies = [
  "libloading",
  "thiserror",
@@ -345,7 +345,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 [[package]]
 name = "llvm-export"
 version = "0.2.1"
-source = "git+https://github.com/NVlabs/cuda-oxide?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
+source = "git+https://github.com/NVIDIA/cuda-rust?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
 dependencies = [
  "bitflags",
  "combine",
@@ -384,7 +384,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 [[package]]
 name = "mir-lower"
 version = "0.2.1"
-source = "git+https://github.com/NVlabs/cuda-oxide?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
+source = "git+https://github.com/NVIDIA/cuda-rust?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
 dependencies = [
  "anyhow",
  "dialect-mir",
@@ -400,7 +400,7 @@ dependencies = [
 [[package]]
 name = "mir-transforms"
 version = "0.2.1"
-source = "git+https://github.com/NVlabs/cuda-oxide?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
+source = "git+https://github.com/NVIDIA/cuda-rust?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
 dependencies = [
  "dialect-mir",
  "pliron",
@@ -411,7 +411,7 @@ dependencies = [
 [[package]]
 name = "nvvm-transforms"
 version = "0.2.1"
-source = "git+https://github.com/NVlabs/cuda-oxide?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
+source = "git+https://github.com/NVIDIA/cuda-rust?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
 dependencies = [
  "llvm-export",
  "pliron",
@@ -540,7 +540,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "reserved-oxide-symbols"
 version = "0.2.1"
-source = "git+https://github.com/NVlabs/cuda-oxide?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
+source = "git+https://github.com/NVIDIA/cuda-rust?rev=0810ba95ff9dcf1ca379b779d3ebe33a8899b15d#0810ba95ff9dcf1ca379b779d3ebe33a8899b15d"
 
 [[package]]
 name = "rustc-hash"

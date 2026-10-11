@@ -1,7 +1,7 @@
 # candle-oxide-kernels
 
 Candle's elementwise CUDA kernels as PTX, generated through
-[cuda-oxide](https://github.com/NVlabs/cuda-oxide) and checked bit-exact against
+[cuda-oxide](https://github.com/NVIDIA/cuda-rust/tree/main/cuda-oxide) and checked bit-exact against
 Candle's own nvcc-built kernels.
 
 The published crate ships 52 precompiled entry points across three PTX modules.

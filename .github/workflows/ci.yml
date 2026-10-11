@@ -113,14 +113,14 @@ jobs:
 
       # candle-oxide-codegen and xtask depend on cuda-oxide-codegen,
       # dialect-mir, dialect-nvvm and pliron, all pinned to
-      # NVlabs/cuda-oxide rev 0810ba95ff9dcf1ca379b779d3ebe33a8899b15d (see
+      # NVIDIA/cuda-rust rev 0810ba95ff9dcf1ca379b779d3ebe33a8899b15d (see
       # candle-oxide-codegen/Cargo.toml). NVIDIA has stated it is folding
       # cuda-oxide into a cuda-rust mono-repo alongside cutile-rs, so crate
       # paths may move and this repository may end up archived. This
       # affects only this job and a maintainer regenerating the artefacts;
       # candle-oxide-kernels depends on neither crate and ships committed
       # PTX. If this job starts failing with a git fetch error against
-      # NVlabs/cuda-oxide, treat that relocation as the first suspect. A
+      # NVIDIA/cuda-rust, treat that relocation as the first suspect. A
       # local checkout of the pinned rev, kept outside this repository, is
       # what a maintainer regenerates the artefacts from; there is no
       # fallback fetch mechanism here.

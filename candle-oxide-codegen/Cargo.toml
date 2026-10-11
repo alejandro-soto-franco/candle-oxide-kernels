@@ -14,7 +14,7 @@ description = "Builds Candle's elementwise CUDA kernels through the cuda-oxide s
 # resolves as a distinct, incompatible crate from cuda-oxide's git copy even
 # at the same version number.
 [dependencies]
-cuda-oxide-codegen = { git = "https://github.com/NVlabs/cuda-oxide", rev = "0810ba95ff9dcf1ca379b779d3ebe33a8899b15d" }
-dialect-mir = { git = "https://github.com/NVlabs/cuda-oxide", rev = "0810ba95ff9dcf1ca379b779d3ebe33a8899b15d" }
-dialect-nvvm = { git = "https://github.com/NVlabs/cuda-oxide", rev = "0810ba95ff9dcf1ca379b779d3ebe33a8899b15d" }
+cuda-oxide-codegen = { git = "https://github.com/NVIDIA/cuda-rust", rev = "0810ba95ff9dcf1ca379b779d3ebe33a8899b15d" }
+dialect-mir = { git = "https://github.com/NVIDIA/cuda-rust", rev = "0810ba95ff9dcf1ca379b779d3ebe33a8899b15d" }
+dialect-nvvm = { git = "https://github.com/NVIDIA/cuda-rust", rev = "0810ba95ff9dcf1ca379b779d3ebe33a8899b15d" }
 pliron = { git = "https://github.com/pliron-org/pliron", rev = "0d3f25df6d0e76b6c6f23d6e17172142b50c715c" }
