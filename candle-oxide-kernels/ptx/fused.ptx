@@ -29,7 +29,8 @@
 	cvt.u64.u32 	%rd13, %r6;
 	setp.le.u64 	%p1, %rd2, %rd13;
 	@%p1 bra 	$L__BB0_3;
-// %bb.1:                               // %bb2.preheader
+	bra.uni 	$L__BB0_1;
+$L__BB0_1:                              // %bb2.preheader
 	ld.param.b64 	%rd5, [fused_bias_f32_param_3];
 	ld.param.b64 	%rd4, [fused_bias_f32_param_2];
 	ld.param.b64 	%rd3, [fused_bias_f32_param_1];
@@ -56,6 +57,7 @@ $L__BB0_2:                              // %bb2
 	setp.gt.u64 	%p2, %rd2, %rd13;
 	add.s32 	%r12, %r12, %r5;
 	@%p2 bra 	$L__BB0_2;
+	bra.uni 	$L__BB0_3;
 $L__BB0_3:                              // %bb3
 	ret;
                                         // -- End function
@@ -81,7 +83,8 @@ $L__BB0_3:                              // %bb3
 	cvt.u64.u32 	%rd13, %r10;
 	setp.le.u64 	%p1, %rd3, %rd13;
 	@%p1 bra 	$L__BB1_5;
-// %bb.1:                               // %bb2.lr.ph
+	bra.uni 	$L__BB1_1;
+$L__BB1_1:                              // %bb2.lr.ph
 	ld.param.b64 	%rd6, [fused_bias_gelu_erf_f32_param_3];
 	ld.param.b64 	%rd5, [fused_bias_gelu_erf_f32_param_2];
 	ld.param.b64 	%rd4, [fused_bias_gelu_erf_f32_param_1];
@@ -92,18 +95,6 @@ $L__BB0_3:                              // %bb3
 	mul.lo.s64 	%rd1, %rd3, %rd7;
 	add.s32 	%r12, %r4, %r3;
 	mad.lo.s32 	%r78, %r2, %r12, %r1;
-	bra.uni 	$L__BB1_2;
-$L__BB1_4:                              // %__nv_normcdff.exit
-                                        //   in Loop: Header=BB1_2 Depth=1
-	mul.rn.f32 	%r76, %r79, 0f3F000000;
-	mul.rn.f32 	%r77, %r6, %r76;
-	add.s64 	%rd12, %rd6, %rd8;
-	st.global.b32 	[%rd12], %r77;
-	cvt.u64.u32 	%rd13, %r78;
-	setp.gt.u64 	%p7, %rd3, %rd13;
-	add.s32 	%r78, %r78, %r5;
-	@%p7 bra 	$L__BB1_2;
-	bra.uni 	$L__BB1_5;
 $L__BB1_2:                              // %bb2
                                         // =>This Inner Loop Header: Depth=1
 	add.s64 	%rd2, %rd13, %rd1;
@@ -185,14 +176,25 @@ $L__BB1_2:                              // %bb2
 	selp.f32 	%r79, %r71, %r69, %p5;
 	setp.geu.f32 	%p6, %r22, 0fBF800000;
 	@%p6 bra 	$L__BB1_4;
-// %bb.3:                               // %__nv_fadd_rn.exit2.i
+	bra.uni 	$L__BB1_3;
+$L__BB1_3:                              // %__nv_fadd_rn.exit2.i
                                         //   in Loop: Header=BB1_2 Depth=1
 	sub.rn.f32 	%r72, %r7, %r9;
 	add.rn.f32 	%r73, %r72, %r8;
 	mul.rn.f32 	%r74, %r9, 0fC0000000;
 	mul.rn.f32 	%r75, %r74, %r79;
 	fma.rn.f32 	%r79, %r75, %r73, %r79;
-	bra.uni 	$L__BB1_4;
+$L__BB1_4:                              // %__nv_normcdff.exit
+                                        //   in Loop: Header=BB1_2 Depth=1
+	mul.rn.f32 	%r76, %r79, 0f3F000000;
+	mul.rn.f32 	%r77, %r6, %r76;
+	add.s64 	%rd12, %rd6, %rd8;
+	st.global.b32 	[%rd12], %r77;
+	cvt.u64.u32 	%rd13, %r78;
+	setp.gt.u64 	%p7, %rd3, %rd13;
+	add.s32 	%r78, %r78, %r5;
+	@%p7 bra 	$L__BB1_2;
+	bra.uni 	$L__BB1_5;
 $L__BB1_5:                              // %bb3
 	ret;
                                         // -- End function
@@ -219,7 +221,8 @@ $L__BB1_5:                              // %bb3
 	cvt.u64.u32 	%rd15, %r6;
 	setp.le.u64 	%p1, %rd2, %rd15;
 	@%p1 bra 	$L__BB2_3;
-// %bb.1:                               // %bb2.preheader
+	bra.uni 	$L__BB2_1;
+$L__BB2_1:                              // %bb2.preheader
 	ld.param.b64 	%rd6, [fused_bias_residual_f32_param_4];
 	ld.param.b64 	%rd5, [fused_bias_residual_f32_param_3];
 	ld.param.b64 	%rd4, [fused_bias_residual_f32_param_2];
@@ -250,6 +253,7 @@ $L__BB2_2:                              // %bb2
 	setp.gt.u64 	%p2, %rd2, %rd15;
 	add.s32 	%r14, %r14, %r5;
 	@%p2 bra 	$L__BB2_2;
+	bra.uni 	$L__BB2_3;
 $L__BB2_3:                              // %bb3
 	ret;
                                         // -- End function
@@ -271,7 +275,8 @@ $L__BB2_3:                              // %bb3
 	cvt.u64.u32 	%rd23, %r7;
 	setp.le.u64 	%p1, %rd3, %rd23;
 	@%p1 bra 	$L__BB3_3;
-// %bb.1:                               // %bb2.lr.ph
+	bra.uni 	$L__BB3_1;
+$L__BB3_1:                              // %bb2.lr.ph
 	ld.param.b64 	%rd5, [fused_permute12_f32_param_2];
 	ld.param.b64 	%rd4, [fused_permute12_f32_param_1];
 	mov.u32 	%r1, %ntid.x;
@@ -309,6 +314,7 @@ $L__BB3_2:                              // %bb2
 	setp.gt.u64 	%p2, %rd3, %rd23;
 	add.s32 	%r10, %r10, %r1;
 	@%p2 bra 	$L__BB3_2;
+	bra.uni 	$L__BB3_3;
 $L__BB3_3:                              // %bb3
 	ret;
                                         // -- End function
@@ -335,7 +341,8 @@ $L__BB3_3:                              // %bb3
 	cvt.u64.u32 	%rd19, %r8;
 	setp.le.u64 	%p1, %rd3, %rd19;
 	@%p1 bra 	$L__BB4_3;
-// %bb.1:                               // %bb2.lr.ph
+	bra.uni 	$L__BB4_1;
+$L__BB4_1:                              // %bb2.lr.ph
 	ld.param.b32 	%r7, [fused_scale_mask_f32_param_4];
 	ld.param.b64 	%rd6, [fused_scale_mask_f32_param_3];
 	ld.param.b64 	%rd5, [fused_scale_mask_f32_param_2];
@@ -373,6 +380,7 @@ $L__BB4_2:                              // %bb2
 	setp.gt.u64 	%p2, %rd3, %rd19;
 	add.s32 	%r17, %r17, %r5;
 	@%p2 bra 	$L__BB4_2;
+	bra.uni 	$L__BB4_3;
 $L__BB4_3:                              // %bb3
 	ret;
                                         // -- End function
@@ -416,7 +424,8 @@ $L__BB4_3:                              // %bb3
 	shl.b64 	%rd24, %rd2, 2;
 	cvt.u32.u64 	%r54, %rd1;
 	@%p1 bra 	$L__BB5_3;
-// %bb.1:                               // %bb2.lr.ph
+	bra.uni 	$L__BB5_1;
+$L__BB5_1:                              // %bb2.lr.ph
 	shl.b64 	%rd13, %rd22, 2;
 	add.s64 	%rd14, %rd13, %rd23;
 	add.s64 	%rd26, %rd5, %rd14;
@@ -437,6 +446,7 @@ $L__BB5_2:                              // %bb2
 	add.s64 	%rd25, %rd25, 128;
 	setp.lt.u32 	%p2, %r55, %r54;
 	@%p2 bra 	$L__BB5_2;
+	bra.uni 	$L__BB5_3;
 $L__BB5_3:                              // %bb3
 	ld.param.b64 	%rd6, [fused_scale_mask_softmax_f32_param_2];
 	setp.ge.u32 	%p3, %r59, %r54;
@@ -451,7 +461,8 @@ $L__BB5_3:                              // %bb3
 	shfl.sync.bfly.b32 	%r23, %r22, 1, 31, -1;
 	mov.b32 	%r58, 0f00000000;
 	@%p3 bra 	$L__BB5_6;
-// %bb.4:                               // %bb5.lr.ph
+	bra.uni 	$L__BB5_4;
+$L__BB5_4:                              // %bb5.lr.ph
 	max.f32 	%r1, %r22, %r23;
 	shl.b64 	%rd16, %rd22, 2;
 	cvt.u64.u32 	%rd17, %r59;
@@ -491,6 +502,7 @@ $L__BB5_5:                              // %bb5
 	add.s64 	%rd27, %rd27, 128;
 	setp.lt.u32 	%p4, %r57, %r54;
 	@%p4 bra 	$L__BB5_5;
+	bra.uni 	$L__BB5_6;
 $L__BB5_6:                              // %bb6
 	shfl.sync.bfly.b32 	%r42, %r58, 16, 31, -1;
 	add.rn.f32 	%r43, %r58, %r42;
@@ -502,7 +514,8 @@ $L__BB5_6:                              // %bb6
 	add.rn.f32 	%r49, %r47, %r48;
 	shfl.sync.bfly.b32 	%r50, %r49, 1, 31, -1;
 	@%p3 bra 	$L__BB5_9;
-// %bb.7:                               // %bb8.lr.ph
+	bra.uni 	$L__BB5_7;
+$L__BB5_7:                              // %bb8.lr.ph
 	add.rn.f32 	%r51, %r49, %r50;
 	rcp.rn.f32 	%r2, %r51;
 	add.s64 	%rd21, %rd24, %rd23;
@@ -516,6 +529,7 @@ $L__BB5_8:                              // %bb8
 	add.s64 	%rd30, %rd30, 128;
 	setp.lt.u32 	%p5, %r59, %r54;
 	@%p5 bra 	$L__BB5_8;
+	bra.uni 	$L__BB5_9;
 $L__BB5_9:                              // %bb9
 	ret;
                                         // -- End function

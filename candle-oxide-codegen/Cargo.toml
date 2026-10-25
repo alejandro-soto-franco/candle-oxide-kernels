@@ -6,15 +6,14 @@ edition.workspace = true
 license.workspace = true
 description = "Builds Candle's elementwise CUDA kernels through the cuda-oxide standalone PTX API"
 
-# Pinned to cuda-oxide rev 0810ba95ff9dcf1ca379b779d3ebe33a8899b15d, resolved
-# as git dependencies (this form worked against `cargo fetch`). `pliron` is
-# pinned to cuda-oxide's own git rev (not a registry version) because
-# pliron types (`Context`, `Ptr<BasicBlock>`, `TypeHandle`, `Value`) cross
-# the API boundary into `cuda_oxide_codegen::experimental`; a registry copy
-# resolves as a distinct, incompatible crate from cuda-oxide's git copy even
-# at the same version number.
+# Pinned to NVIDIA/cuda-rust rev 9df9e7cef561e03a066230b3bb433b3d8285da81,
+# the first rev with cuda-oxide on stable Rust 1.99.1. `pliron` is pinned to
+# the exact release cuda-oxide uses because pliron types (`Context`,
+# `Ptr<BasicBlock>`, `TypeHandle`, `Value`) cross the API boundary into
+# `cuda_oxide_codegen::experimental`, and a second copy resolves as a
+# distinct, incompatible crate.
 [dependencies]
-cuda-oxide-codegen = { git = "https://github.com/NVIDIA/cuda-rust", rev = "0810ba95ff9dcf1ca379b779d3ebe33a8899b15d" }
-dialect-mir = { git = "https://github.com/NVIDIA/cuda-rust", rev = "0810ba95ff9dcf1ca379b779d3ebe33a8899b15d" }
-dialect-nvvm = { git = "https://github.com/NVIDIA/cuda-rust", rev = "0810ba95ff9dcf1ca379b779d3ebe33a8899b15d" }
-pliron = { git = "https://github.com/pliron-org/pliron", rev = "0d3f25df6d0e76b6c6f23d6e17172142b50c715c" }
+cuda-oxide-codegen = { git = "https://github.com/NVIDIA/cuda-rust", rev = "9df9e7cef561e03a066230b3bb433b3d8285da81" }
+dialect-mir = { git = "https://github.com/NVIDIA/cuda-rust", rev = "9df9e7cef561e03a066230b3bb433b3d8285da81" }
+dialect-nvvm = { git = "https://github.com/NVIDIA/cuda-rust", rev = "9df9e7cef561e03a066230b3bb433b3d8285da81" }
+pliron = "=0.20.0"

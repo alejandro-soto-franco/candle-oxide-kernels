@@ -59,12 +59,37 @@ fn the_null_strides_pointer_is_tested() {
         .lines()
         .map(str::trim)
         .find(|line| line.starts_with("setp."));
+    // LLVM may also compare against the null pointer converted to the global
+    // window (`mov.b64 %rdN, 0; cvta.to.global.u64 %rdM, %rdN`), which is the
+    // address 0 there.
+    let is_global_null = |reg: &str| {
+        let lines: Vec<&str> = body.lines().map(str::trim).collect();
+        lines.iter().any(|line| {
+            let Some(rest) = line.strip_prefix("cvta.to.global.u64") else {
+                return false;
+            };
+            let mut regs = rest.trim_end_matches(';').split(',').map(str::trim);
+            regs.next() == Some(reg)
+                && regs.next().is_some_and(|src| {
+                    lines.contains(&format!("mov.b64 \t{src}, 0;").as_str())
+                        || lines.contains(&format!("mov.b64 {src}, 0;").as_str())
+                })
+        })
+    };
     match first_setp {
-        Some(line) => assert!(
-            line.starts_with("setp.eq.b64") && line.trim_end_matches(';').ends_with(", 0"),
-            "the first predicate in the entry must be `dims_and_strides == 0`, \
-             saw `{line}`:\n{body}"
-        ),
+        Some(line) => {
+            let rhs = line
+                .trim_end_matches(';')
+                .rsplit(',')
+                .next()
+                .unwrap()
+                .trim();
+            assert!(
+                line.starts_with("setp.eq.b64") && (rhs == "0" || is_global_null(rhs)),
+                "the first predicate in the entry must be `dims_and_strides == 0`, \
+                 saw `{line}`:\n{body}"
+            )
+        }
         None => panic!("no predicate found before any load:\n{body}"),
     }
 }

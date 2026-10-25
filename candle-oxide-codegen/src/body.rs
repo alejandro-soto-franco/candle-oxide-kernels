@@ -11,15 +11,17 @@ use dialect_mir::ops::{
 use pliron::{
     basic_block::BasicBlock,
     builtin::attributes::StringAttr,
-    builtin::types::FP64Type,
+    builtin::types::{FP64Type, FunctionType},
     context::{Context, Ptr},
     op::Op,
     operation::Operation,
-    r#type::TypeHandle,
+    r#type::{TypeHandle, Typed},
     value::Value,
 };
 
-/// Emit a call to `callee` with `args`, returning its single result.
+/// Emit a call to the libdevice function `callee` with `args`, returning its
+/// single result. The call states the callee's signature, since the module
+/// has no `mir.func` for a libdevice symbol.
 pub(crate) fn call(
     ctx: &mut Context,
     block: Ptr<BasicBlock>,
@@ -27,6 +29,7 @@ pub(crate) fn call(
     result_ty: TypeHandle,
     args: Vec<Value>,
 ) -> Value {
+    let arg_tys = args.iter().map(|arg| arg.get_type(ctx)).collect();
     let op = Operation::new(
         ctx,
         MirCallOp::get_concrete_op_info(),
@@ -35,7 +38,10 @@ pub(crate) fn call(
         vec![],
         0,
     );
-    MirCallOp::new(op).set_attr_callee(ctx, StringAttr::new(callee.to_string()));
+    let signature = FunctionType::get(ctx, arg_tys, vec![result_ty]).into();
+    let call = MirCallOp::new(op);
+    call.set_attr_callee(ctx, StringAttr::new(callee.to_string()));
+    call.set_external_callee_signature(ctx, signature);
     let res = op.deref(ctx).get_result(0);
     op.insert_at_back(block, ctx);
     res
