@@ -5,7 +5,7 @@ Candle's elementwise CUDA kernels as PTX, generated through
 Candle's own nvcc-built kernels.
 
 The published crate ships 52 precompiled entry points across three PTX modules.
-It carries no build dependencies, needs no nightly toolchain, and needs neither a
+It has no build dependencies, needs no nightly toolchain, and needs neither a
 CUDA toolkit nor a GPU to build.
 
 ## Usage
@@ -29,7 +29,7 @@ into a fixed array.
 ## Verification
 
 - 63 parity cases against Candle's stock kernels at difference exactly 0.0, with
-  no tolerance, covering both dtypes, all four binary layout paths and both unary
+  no tolerance, covering the dtypes, the four binary layout paths and the two unary
   ones, contiguous and strided.
 - All 46 elementwise entries compared against their nvcc-built counterparts on
   hardware over 64 special values, covering NaN, both infinities, signed zeros,
@@ -69,7 +69,7 @@ running GPU implements.
 
 Building `candle-oxide-codegen` and `xtask` needs LLVM 21 or later (`llc`,
 `opt`). The reproducibility, parameter-shape and `ptxas` assembly checks under
-`cargo test --workspace` additionally need a CUDA toolkit, though no GPU.
+`cargo test --workspace` also need a CUDA toolkit, though no GPU.
 
 ## Licence
 
